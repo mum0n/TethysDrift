@@ -1,26 +1,26 @@
 # ==============================================================================
-#  store_reader.jl -- reading the realized simulation from its GeoData store
+#  store_reader.jl -- reading the realized simulation from its Tethys store
 # ==============================================================================
 #
 #  Replaces `flow_reader.jl`, which read Oceananigans' JLD2 archive plus a separate grid
 #  sidecar. That reader existed because the archive was the only thing a run produced; now the
-#  run writes its slices into a GeoData store that carries its own coordinates, so a reader
+#  run writes its slices into a Tethys store that carries its own coordinates, so a reader
 #  opens one path and gets flow, axes, and times from it.
 #
-#  What the store provides (written by `GeoOceanModel.attach_output_callback!`):
+#  What the store provides (written by `TethysFlow.attach_output_callback!`):
 #
 #      hydrodynamics.zarr/          a GeoDataset
 #        .zattrs                    title, created_utc, and the seabed the run immersed
 #        lon, lat, depth, time      coordinate arrays, in the dataset's own `coords`
 #        T, u, v, w                 fields, each (lon, lat, depth, time)
 #
-#  Reading it is `GeoData.geoload(store)`. That is the whole point of the store being a GeoData
-#  store: an earlier writer put each interval in its own directory (`T/0`, `T/1`), which GeoData's
+#  Reading it is `Tethys.geoload(store)`. That is the whole point of the store being a Tethys
+#  store: an earlier writer put each interval in its own directory (`T/0`, `T/1`), which Tethys's
 #  Zarr reader cannot open -- it discovers variables as the root group's child arrays -- so every
 #  consumer walked Zarr itself. This did. Now it does not.
 #
 #  This package does not know how the store was produced. It knows the layout, and that is the
-#  whole coupling between the two packages: `GeoOceanModel` writes it, this package reads it,
+#  whole coupling between the two packages: `TethysFlow` writes it, this package reads it,
 #  and neither imports the other. The layout is asserted in `test_store_reader.jl` rather than
 #  assumed, so a change on either side shows as a failed read.
 #
@@ -28,8 +28,8 @@
 #  in JLD2, the one format Oceananigans can checkpoint-restart from.
 # ==============================================================================
 
-using GeoData
-using GeoData: GeoDataset
+using Tethys
+using Tethys: GeoDataset
 
 """
     _store_path(location) -> String
@@ -105,19 +105,19 @@ end
 """
     _geoload(store) -> GeoDataset
 
-The store as a GeoData dataset, opened through GeoData.
+The store as a Tethys dataset, opened through Tethys.
 
 An empty variable set is an error here rather than at the first read: it is what a store that
-is not GeoData's shape produces -- `geoload` succeeds and finds nothing -- and the failure used
+is not Tethys's shape produces -- `geoload` succeeds and finds nothing -- and the failure used
 to surface three call sites later as "does not carry T", naming the wrong layer.
 """
 function _geoload(store::AbstractString)
-    ds = GeoData.geoload(_store_path(store); backend = :zarr)
+    ds = Tethys.load_dataset(_store_path(store); backend = :zarr)
     isempty(ds.variables) && error(
-        "The store at $(store) opens as a GeoData dataset with no variables. Either it is " *
+        "The store at $(store) opens as a Tethys dataset with no variables. Either it is " *
         "empty, or it was written by an older writer that put each interval in its own " *
-        "directory (`T/0`, `T/1`), which GeoData cannot read. Re-run the simulation to " *
-        "produce a GeoData store.")
+        "directory (`T/0`, `T/1`), which Tethys cannot read. Re-run the simulation to " *
+        "produce a Tethys store.")
     return ds
 end
 
@@ -282,24 +282,24 @@ store_location(location::AbstractString) = abspath(location)
                                   domain_lat::Tuple{<:Real, <:Real} = (-90.0, 90.0),
                                   grid_size::Tuple{Int, Int} = (0, 0)) -> NamedTuple
 
-Read one interval from a GeoOceanModel Zarr store and return a NamedTuple compatible with
+Read one interval from a TethysFlow Zarr store and return a NamedTuple compatible with
 the figure pipeline. Fields: lons, lats, depths, u, v, w, temperature, salinity,
 bathymetry, speed, diffusion, stratification, time_seconds, depth_index, depth_m.
 
-This is GeoLarvalTracking's local reader for the shared store layout. The two packages do not
-import each other; each defines its own reader for the store that GeoOceanModel writes.
+This is TethysDrift's local reader for the shared store layout. The two packages do not
+import each other; each defines its own reader for the store that TethysFlow writes.
 
 # Inputs
-- `location`: Path to a Zarr store directory written by GeoOceanModel.
+- `location`: Path to a Zarr store directory written by TethysFlow.
 - `time_index`: 1-based snapshot index.
 - `time_seconds`: If provided, the nearest interval to this time is selected (overrides
   `time_index`).
-- `domain_lon`, `domain_lat`: Accepted for API compatibility with GeoOceanModel's reader;
+- `domain_lon`, `domain_lat`: Accepted for API compatibility with TethysFlow's reader;
   the Zarr store already carries its own coordinates, so these are not used for subsetting.
 - `grid_size`: Accepted for API compatibility; the Zarr store carries its own resolution.
 
 # Outputs
-A NamedTuple with fields matching GeoOceanModel's `extract_hydrodynamic_dataset` output,
+A NamedTuple with fields matching TethysFlow's `extract_hydrodynamic_dataset` output,
 so figure families can consume either package's store reader interchangeably.
 """
 function extract_hydrodynamic_dataset(location::AbstractString;

@@ -259,7 +259,7 @@ function configuration_to_options(config_dict::AbstractDict;
      # shared resolver, so the environment override, the local preference and the user
      # configuration apply here as they do everywhere else.
      _config_stem = isempty(strip(config_name)) ? "default" : strip(String(config_name))
-     _lakehouse_output = GeoData.lakehouse_dir("GeoLarvalTracking", _config_stem)
+     _lakehouse_output = Tethys.lakehouse_dir("TethysDrift", _config_stem)
      # The path is resolved against THIS PACKAGE'S ROOT, not the current working directory:
      # a run started from anywhere then lands in the same place. The resolver also accepts
      # the lakehouse either inside the project (`lakehouse/...`) or beside it
@@ -268,7 +268,7 @@ function configuration_to_options(config_dict::AbstractDict;
      # resolved absolutely, so a run started from any working directory writes to the
      # same place.
      output_dir = isempty(_storage_output) ? _lakehouse_output :
-                  GeoData.project_lakehouse_path(_storage_output, _PROJECT_ROOT)
+                  Tethys.project_lakehouse_path(_storage_output, _PROJECT_ROOT)
      # The trajectory store lives under this run's output directory unless the
      # configuration names a path explicitly. A CWD-relative path put the store
      # outside the lakehouse whenever the run was started from elsewhere.
@@ -277,7 +277,7 @@ function configuration_to_options(config_dict::AbstractDict;
      enable_zarr = Bool(get_val("storage", "enable_zarr", true))
      
      enable_checkpoint = Bool(get_val("storage", "enable_checkpoint", true))
-     checkpoint_prefix = String(get_val("storage", "checkpoint_prefix", "checkpoint_ParticleTracking"))
+     checkpoint_prefix = String(get_val("storage", "checkpoint_prefix", "checkpoint_TethysDrift"))
      checkpoint_schedule_seconds = Float64(get_val("storage", "checkpoint_schedule_seconds", 21600.0))
      checkpoint_dir = String(get_val("storage", "checkpoint_dir", ""))
      checkpoint_cleanup = Bool(get_val("storage", "checkpoint_cleanup", true))
@@ -295,7 +295,7 @@ function configuration_to_options(config_dict::AbstractDict;
      # tree. Named explicitly, they are honoured; otherwise they are derived.
      zarr_path = isempty(strip(_zarr_raw)) ?
                  joinpath(output_dir, "particle_tracking.zarr") :
-                 GeoData.project_lakehouse_path(_zarr_raw, _PROJECT_ROOT)
+                 Tethys.project_lakehouse_path(_zarr_raw, _PROJECT_ROOT)
      seed       = Int(get_val("runtype", "seed", 42))
 
      # The realized ocean store this run tracks through. `[storage] ocean_model` names it;
@@ -305,7 +305,9 @@ function configuration_to_options(config_dict::AbstractDict;
      # unqualified fallback used to look and where no ocean store has ever been.
      hydro_file = String(get_val("storage", "ocean_model",
                           get_val("hydrodynamics", "hydro_model_file",
-                              GeoData.lakehouse_dir("GeoOceanModel", _config_stem))))
+                              let p = Tethys.lakehouse_dir("TethysFlow", _config_stem)
+                                  isdir(p) ? p : Tethys.lakehouse_dir("TethysFlow", _config_stem)
+                              end)))
      hydro_only = Bool(get_val("hydrodynamics", "hydro_only", false))
      track_only = Bool(get_val("hydrodynamics", "track_only", false))
     reuse_hydro = Bool(get_val("hydrodynamics", "reuse_hydro", false))
@@ -325,7 +327,7 @@ function configuration_to_options(config_dict::AbstractDict;
     _cp_raw = String(get_val("storage", "checkpoint_dir", ""))
     cp_dir = isempty(strip(_cp_raw)) ?
                joinpath(output_dir, "checkpoints") :
-               GeoData.project_lakehouse_path(_cp_raw, _PROJECT_ROOT)
+               Tethys.project_lakehouse_path(_cp_raw, _PROJECT_ROOT)
     cp_clean  = Bool(get_val("storage", "checkpoint_cleanup", true))
     auto_res  = Bool(get_val("hydrodynamics", "auto_restart", true))
     overwrite_val = Bool(get_val("hydrodynamics", "overwrite", false))

@@ -1,10 +1,10 @@
 """
     hydrodynamic_figures.jl
 
-Hydrodynamic Eulerian figures for GeoLarvalTracking's --viz path.
+Hydrodynamic Eulerian figures for TethysDrift's --viz path.
 
-These are GeoLarvalTracking's local versions of the ocean figure functions. The two packages
-do not import each other (SPLIT_PLAN.md section 1), so GeoLarvalTracking renders hydrodynamic
+These are TethysDrift's local versions of the ocean figure functions. The two packages
+do not import each other (SPLIT_PLAN.md section 1), so TethysDrift renders hydrodynamic
 fields from the store the ocean half wrote, using its own `extract_hydrodynamic_dataset`
 reader.
 """

@@ -1,5 +1,6 @@
 using Test
-using GeoLarvalTracking
+using TethysDrift
+const TethysDrift = TethysDrift
 
 @testset "Driver Segments & Surface API" begin
     # These lived in the umbrella's script, where `Pkg.test` could not reach them. Being
@@ -8,6 +9,6 @@ using GeoLarvalTracking
                  "render_all_figures", "load_run_trajectories", "run_cli_list_runs",
                  "run_cli_compare_runs", "run_cli_model_average",
                  "create_flow_interpolator", "open_hydrodynamics")
-        @test isdefined(GeoLarvalTracking, Symbol(name))
+        @test isdefined(TethysDrift, Symbol(name))
     end
 end

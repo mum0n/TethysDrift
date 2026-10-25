@@ -1,11 +1,11 @@
-# GeoLarvalTracking
+# TethysDrift
 
 Snow-crab larval-connectivity modelling. It tracks snow-crab larvae through a realized ocean
 simulation and derives recruitment/connectivity metrics.
 
 ## What it does
 
-`GeoLarvalTrackingRun.jl` dispatches (`src/driver.jl`, library code) to:
+`TethysDriftRun.jl` dispatches (`src/driver.jl`, library code) to:
 
 - **`run_segment_tracking`** — release a larval cohort into an ocean store, advect/disperse/DVM/
   degree-day-molt the particles through it, and store trajectories.
@@ -19,15 +19,15 @@ hydrodynamic store and reads `u,v,w,T` per interval with the store's own cell-ce
 coordinates. The spawn domain is taken from the store's own axes when present, CFA boundaries
 otherwise.
 
-That store is **input data produced elsewhere**: a `hydrodynamics.zarr` GeoData store written by
-an ocean run — [`GeoOceanModel`](../GeoOceanModel/README.md) produces the ones this package's
+That store is **input data produced elsewhere**: a `hydrodynamics.zarr` Tethys store written by
+an ocean run — [`TethysFlow`](../TethysFlow/README.md) produces the ones this package's
 configs default to. It is read-only here. The store's own coordinates are used rather than a
 grid declared in this package, so the two cannot drift apart.
 
 ## Running
 
 ```
-julia --project=. GeoLarvalTrackingRun.jl --rerun \
+julia --project=. TethysDriftRun.jl --rerun \
   --hydro-file=<ocean store> \
   --config=default            # or --config=snowcrab
 ```
@@ -49,7 +49,7 @@ Two, in `configs/` (the biology schema sections — `biology`, `dvm`,
 - **`[storage]`** is where the run reads and writes: `output_dir` (this package's results
   directory) and `ocean_model` (the realized ocean store to track through — the
   `--hydro-file` default). Both default into `lakehouse_dir("Geo{Larval,Ocean}Model", …)`;
-  a command-line `--hydro-file` overrides. `ocean_model` names the GeoData store itself —
+  a command-line `--hydro-file` overrides. `ocean_model` names the Tethys store itself —
   the `hydrodynamics.zarr` directory the ocean half wrote — not the run directory holding
   it.
 - A configuration that names no output directory of its own still writes into the
@@ -59,17 +59,17 @@ Two, in `configs/` (the biology schema sections — `biology`, `dvm`,
 
 ### Shared Lakehouse Configuration
 
-`GeoLarvalTracking` resolves all lakehouse directories via `GeoData.lakehouse_dir(...)`.
+`TethysDrift` resolves all lakehouse directories via `Tethys.lakehouse_dir(...)`.
 Precedence hierarchy:
 * `ENV["GEODATA_LAKEHOUSE"]` (global override).
-* `LocalPreferences.toml` (`[GeoData] lakehouse_dir`).
+* `LocalPreferences.toml` (`[Tethys] lakehouse_dir`).
 * `~/.geodata/storage.toml` (`[storage] store_root`).
 * Proximity fallback (`projects/lakehouse/`).
 
 To configure the lakehouse persistently:
 ```julia
-using GeoData
-GeoData.set_lakehouse_dir!("/path/to/shared/lakehouse")
+using Tethys
+Tethys.set_lakehouse_dir!("/path/to/shared/lakehouse")
 ```
 
 ## Results
@@ -90,7 +90,7 @@ ocean store, which is read only.
 
 ## Documentation
 
-- [`docs/GeoLarvalTracking.md`](docs/GeoLarvalTracking.md) — the full reference manual
+- [`docs/TethysDrift.md`](docs/TethysDrift.md) — the full reference manual
   (configuration, biology, analysis, storage, visualization).
 - [`docs/snow_crab_larval_connectivity_paper.md`](docs/snow_crab_larval_connectivity_paper.md)
   — the snow-crab larval connectivity paper.

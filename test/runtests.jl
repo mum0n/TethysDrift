@@ -1,5 +1,5 @@
 # ==============================================================================
-# GeoLarvalTracking Comprehensive Test Suite Orchestrator
+# TethysDrift Comprehensive Test Suite Orchestrator
 # ==============================================================================
 
 import Pkg
@@ -20,8 +20,9 @@ end
 # ==============================================================================
 
 using Test
-using GeoLarvalTracking
-using GeoData
+using TethysDrift
+const TethysDrift = TethysDrift
+using Tethys
 using JSON3
 
 const AVAILABLE_SEGMENTS = Dict{Symbol, @NamedTuple{file::String, desc::String}}(
@@ -61,7 +62,7 @@ end
 
 requested_segments = parse_requested_segments(ARGS)
 
-@testset "GeoLarvalTracking Comprehensive Suite" begin
+@testset "TethysDrift Comprehensive Suite" begin
     for seg_key in requested_segments
         info = AVAILABLE_SEGMENTS[seg_key]
         println("\n" * "="^80)

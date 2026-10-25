@@ -79,18 +79,6 @@ const DOMAIN_SECTIONS = Dict{Symbol, Vector{String}}(
 )
 
 """
-    OCEAN_CONFIG, BIOLOGY_CONFIG
-
-Where the two half-configurations live, relative to the workspace.
-
-They are the files that will move into `GeoOceanModel/` and `GeoLarvalTracking/` in phase 6;
-until that move they are siblings of this package, and this is the one place their location is
-written down.
-"""
-const OCEAN_CONFIG   = joinpath("GeoOceanModel", "ParticleTracking.toml")
-const BIOLOGY_CONFIG = joinpath("GeoLarvalTracking", "ParticleTracking.toml")
-
-"""
     section_domain(section::AbstractString) -> Symbol
 
 Which domain a configuration section belongs to, erroring when the section is not known.

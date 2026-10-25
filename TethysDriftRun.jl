@@ -1,5 +1,5 @@
 # ==============================================================================
-#  GeoLarvalTrackingRun.jl -- CLI for the Lagrangian half
+#  TethysDriftRun.jl -- CLI for the Lagrangian half
 # ==============================================================================
 #
 #  This file holds CLI interaction only: environment bootstrap, flag parsing, and dispatch.
@@ -20,8 +20,8 @@
 #  CLI here is for producing and re-reading results, not for asserting anything about them.
 #
 #  Usage:
-#      julia --project=. GeoLarvalTrackingRun.jl --help
-#      julia --project=. GeoLarvalTrackingRun.jl --rerun
+#      julia --project=. TethysDriftRun.jl --help
+#      julia --project=. TethysDriftRun.jl --rerun
 # ==============================================================================
 
 # Captured at top level: `@__FILE__` is only valid at file scope.
@@ -31,12 +31,12 @@ const _THIS_SCRIPT = @__FILE__
 # bootstrap is skipped when this file is `include`d from a test, and wrapped in a `let` so the
 # search's assignments have a local scope instead of ambiguous soft-scoped script globals.
 if !isempty(PROGRAM_FILE) && abspath(PROGRAM_FILE) == _THIS_SCRIPT &&
-   Base.find_package("GeoLarvalTracking") === nothing
+   Base.find_package("TethysDrift") === nothing
     import Pkg
     let curr = @__DIR__
         while true
             proj = joinpath(curr, "Project.toml")
-            if isfile(proj) && occursin("name = \"GeoLarvalTracking\"", read(proj, String))
+            if isfile(proj) && occursin("name = \"TethysDrift\"", read(proj, String))
                 Pkg.activate(curr)
                 break
             end
@@ -47,11 +47,11 @@ if !isempty(PROGRAM_FILE) && abspath(PROGRAM_FILE) == _THIS_SCRIPT &&
     end
 end
 
-using GeoLarvalTracking
-using GeoLarvalTracking: configuration_to_options, options_to_configuration,
+using TethysDrift
+using TethysDrift: configuration_to_options, options_to_configuration,
     save_configuration, load_configuration, resolve_config_name, run_segment_tracking,
     run_segment_metrics, run_segment_visualize, render_all_figures, HydrodynamicOptions
-using GeoData
+using Tethys
 
 """
     display_help(io::IO = stdout)
@@ -60,10 +60,10 @@ The four verbs and the two flags that modify them.
 """
 function display_help(io::IO = stdout)
     println(io, """
-    GeoLarvalTrackingRun.jl -- larval tracking through a realized ocean simulation.
+    TethysDriftRun.jl -- larval tracking through a realized ocean simulation.
 
     Usage:
-      julia --project=. GeoLarvalTrackingRun.jl [flags]
+      julia --project=. TethysDriftRun.jl [flags]
 
     Verbs:
       --rerun      Run the tracking again, reusing the existing hydrodynamic store.
@@ -86,7 +86,7 @@ function display_help(io::IO = stdout)
       --config=FILE        A path, or a name resolved against configs/.
       --hydro-file=PATH    The realized ocean simulation to track through. REQUIRED for
                           --rerun, --force and --quick: this is the only coupling with
-                          GeoOceanModel, and it is a path. Its metadata states the domain, so
+                          TethysFlow, and it is a path. Its metadata states the domain, so
                           the ocean half's configuration is never read here.
       --save-config[=D]    Write the fully-resolved configuration, then exit.
 
@@ -95,7 +95,7 @@ function display_help(io::IO = stdout)
                     biology; run against the keyless ocean default.toml store.
       snowcrab      Snow Crab production -- 500-particle cohort over the 60-day pelagic
                     larval duration with snow-crab biology, run against the ocean
-                    scotian_shelf.toml store (GeoOceanModel/configs/scotian_shelf.toml).
+                    scotian_shelf.toml store (TethysFlow/configs/scotian_shelf.toml).
 
     There are no per-run override flags. A particle count or a duration belongs in the TOML so
     the value is recorded with the run; a flag for it is a flag whose value nobody writes down,
@@ -187,7 +187,7 @@ things because of it:
   * the DOWNLOADED STORE -- this run's `inputs/`: the coastal polygons and the vertical
     grid. `--blank_state` clears these as well, so the next run fetches them again.
 
-The shared GeoData store under the lakehouse is never touched: it holds the ocean half's
+The shared Tethys store under the lakehouse is never touched: it holds the ocean half's
 flow solution, which this half tracks through and does not own.
 
 `input` is the stream the answer is read from: `stdin` in a run, and a buffer when the
@@ -203,7 +203,7 @@ function clear_run_state(opts::HydrodynamicOptions; blank_state::Bool = false,
     result_globs = isempty(strip(opts.checkpoint_dir)) ? String[] :
                    [joinpath(opts.checkpoint_dir, "*.jld2")]
     inputs = [opts.input_dir]
-    return GeoData.purge_run_state(out_dir; results, result_globs, inputs,
+    return Tethys.purge_run_state(out_dir; results, result_globs, inputs,
                                    blank_state = blank_state, input = input)
 end
 
@@ -254,7 +254,7 @@ function main(args::Vector{String})
     end
 
     println("="^73)
-    println(" GeoLarvalTracking")
+    println(" TethysDrift")
     println("="^73)
     println(" Verb:       --$(flags["verb"])")
     println(" Config:     $(cfg_file)")

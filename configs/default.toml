@@ -1,10 +1,10 @@
 # =============================================================================
-# GeoLarvalTracking - Default Demonstration Configuration
+# TethysDrift - Default Demonstration Configuration
 # =============================================================================
 # The larval half of a run: Lagrangian drift, diel vertical migration, degree-day
 # molting, thermal mortality, and settlement on the nursery grounds.
 #
-#   julia --project=. GeoLarvalTrackingRun.jl --config=configs/default.toml
+#   julia --project=. TethysDriftRun.jl --config=configs/default.toml
 #
 # This file is the record of the model that ran. Every parameter the package reads
 # is written here with the value the run used, so a run can be reproduced from its
@@ -15,7 +15,7 @@
 #   * A value here is the truth. The code reads it; the code does not hold a
 #     competing copy of it.
 #
-# The ocean half is configured separately, in GeoOceanModel's own configuration
+# The ocean half is configured separately, in TethysFlow's own configuration
 # files. The two are coupled by PATH, not by a shared file: `[storage] ocean_model`
 # names the realized ocean store this run tracks through, and the run reads that
 # store's own coordinates. The ocean's domain, grid and forcing are therefore not
@@ -30,11 +30,11 @@
 #
 # Relative paths are resolved against this package's root, so `../lakehouse/...` is
 # the sibling lakehouse and `lakehouse/...` the in-project one; either form works.
-output_dir = "../lakehouse/GeoLarvalTracking/default"
+output_dir = "../lakehouse/TethysDrift/default"
 # The realized ocean store this run tracks through: the `hydrodynamics.zarr`
 # directory the ocean half wrote, not the run directory that contains it. A
 # command-line `--hydro-file` overrides this.
-ocean_model = "../lakehouse/GeoOceanModel/default/hydrodynamics.zarr"
+ocean_model = "../lakehouse/TethysFlow/default/hydrodynamics.zarr"
 # The backend the larval data is written in.
 storage_backend = "zarr"
 # Whether the trajectory store is written at all.
@@ -45,7 +45,7 @@ output_schedule_seconds = 21600.0
 # Whether restart archives are written.
 enable_checkpoint = true
 # Filename prefix of the restart archives.
-checkpoint_prefix = "checkpoint_ParticleTracking"
+checkpoint_prefix = "checkpoint_TethysDrift"
 # State-checkpoint cadence, in seconds.
 checkpoint_schedule_seconds = 21600.0
 # Whether older restart archives are purged when a new one is written.
@@ -62,7 +62,7 @@ run_id = ""
 # The box the larvae are released into, and the region the run's outputs describe.
 # These are the ocean run's own domain: the coupling is by path, and a larval
 # release box that is not the box the ocean covered would put larvae in water the
-# model never simulated. They match GeoOceanModel's `default.toml`.
+# model never simulated. They match TethysFlow's `default.toml`.
 lon_min = -61.2               # Western boundary longitude (°E)
 lon_max = -59.6               # Eastern boundary longitude (°E)
 lat_min = 45.0                # Southern boundary latitude (°N)
@@ -137,17 +137,6 @@ larval_max_intermolt_days = 84.0 # The maximum viable duration of a pelagic stag
 settlement_min_depth = -250.0 # Deepest edge of the settlement habitat (m)
 settlement_max_depth = -50.0  # Shallowest edge of the settlement habitat (m)
 settlement_max_temp = 6.0     # Warmest bottom temperature a larva will settle at (°C)
-
-[visualization]
-# What the run draws.
-interactive_map = true        # The interactive HTML5 Leaflet dashboard
-animate_hydro = false         # A hydrodynamic animation (off: it is expensive)
-anim_variable = "dashboard"   # Variable to animate: "dashboard", "speed", "temperature", "eta"
-anim_fps = 10                 # Animation frame rate
-anim_format = "mp4"           # Animation container: "mp4", "gif" or "webm"
-anim_depth = -2.5             # Depth slice for the 2-D flow animation (m)
-anim_overlay_particles = false # Draw the larvae on top of the flow field
-anim_output_path = ""         # Where the animation is written; empty means beside the figures
 
 [runtype]
 # What kind of run this is, and what makes it reproducible. The same section the ocean

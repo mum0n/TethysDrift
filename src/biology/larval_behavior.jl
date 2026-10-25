@@ -1613,7 +1613,7 @@ function initialize_larval_particles(
                         (isnothing(resolved_stratum_poly) || buffer_km > 0.0)
 
     if use_grid_sampling && isnothing(resolved_stratum_poly)
-          # Access goes through GeoData: `sample_marine_cells` takes a dataset rather than a
+          # Access goes through Tethys: `sample_marine_cells` takes a dataset rather than a
           # path. The old `sample_marine_coordinates` was exported by this module but defined
           # nowhere, so this call could only ever have raised.
           sampled = sample_marine_cells(n_particles; bathymetry_ds = resolved_bathy,
@@ -1631,14 +1631,14 @@ function initialize_larval_particles(
         bathy_fn = if resolved_bathy isa Function
             resolved_bathy
         elseif resolved_bathy isa GeoDataset
-            GeoData.get_bathymetry_interpolator(resolved_bathy)
+            Tethys.get_bathymetry_interpolator(resolved_bathy)
         elseif resolved_bathy isa NamedTuple
             # Arrays, in the `(elevation, lon, lat)` contract `bathymetry_arrays` returns.
             hasproperty(resolved_bathy, :elevation) || error(
                 "Bathymetry NamedTuple has no `elevation` field; it has " *
-                "$(propertynames(resolved_bathy)). Use `GeoDataSources.bathymetry_arrays` " *
+                "$(propertynames(resolved_bathy)). Use `Tethys.bathymetry_arrays` " *
                 "to build one.")
-            GeoData.get_bathymetry_interpolator(
+            Tethys.get_bathymetry_interpolator(
                 Float64.(resolved_bathy.elevation),
                 Float64.(collect(resolved_bathy.lon)),
                 Float64.(collect(resolved_bathy.lat)))

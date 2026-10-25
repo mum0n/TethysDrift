@@ -31,7 +31,7 @@ Resolve the target realized-simulation store path and name. If `opts.hydro_model
 specified it is used directly (or resolved against the package root when it is a path,
 or against `opts.output_dir` when it is a bare name); if empty it is
 `joinpath(opts.output_dir, default_filename)`. The path is normally the
-GeoData store the ocean half hands over as `--hydro-file`, though the name is left generic so
+Tethys store the ocean half hands over as `--hydro-file`, though the name is left generic so
 it also covers a JLD2 file a caller names.
 
 # Inputs
@@ -56,7 +56,7 @@ function resolve_hydro_model_path(opts::HydrodynamicOptions, default_filename::S
         full_path = if isabspath(raw)
             raw
         elseif dirname(raw) != ""
-            GeoData.project_lakehouse_path(raw, _PROJECT_ROOT)
+            Tethys.project_lakehouse_path(raw, _PROJECT_ROOT)
         else
             joinpath(opts.output_dir, raw)
         end
@@ -138,7 +138,7 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
     println("=================================================================")
     rng = MersenneTwister(opts.seed)
 
-    # The realized ocean simulation is a GeoData store, and the coupling between the two
+    # The realized ocean simulation is a Tethys store, and the coupling between the two
     # halves is that store's identity -- a path. GeoOceanModelRun.jl prints it as `--hydro-file`,
     # which the CLI passes here on `opts.hydro_model_file`; nothing else carries it across, and
     # the ocean half's own configuration is never opened here. Its interior cell centres also
@@ -165,7 +165,7 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
                   "$(location) ($(sprint(showerror, err))). Run GeoOceanModelRun.jl --hydro-only " *
                   "first, or pass --hydro-file=<store>.")
         end
-        @warn "No GeoData store at $(location) ($(sprint(showerror, err))); " *
+        @warn "No Tethys store at $(location) ($(sprint(showerror, err))); " *
               "the analytical shelf jet will stand in."
         nothing
     end
@@ -213,7 +213,7 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
     # settled, so the drift is never shorter than the model it is driven by. `build_flow_from_store`
     # writes the retained span back through `hydro_span`.
     flow_interpolator = if !isnothing(store)
-        println("Reading 4D simulated fields from the GeoData store at $(store.location) " *
+        println("Reading 4D simulated fields from the Tethys store at $(store.location) " *
                 "($(length(store.times)) interval(s))...")
         try
             # Intervals are held in memory for the run: `track_larval_cohort` samples the field
@@ -689,7 +689,7 @@ end
     _complete_stage_diagnostics(trajs::NamedTuple, opts) -> NamedTuple
 
 Add `molt_schedule` and `cohort_molt_fraction` to a trajectory set that lacks them, such as one
-read back from Zarr/GeoData storage, which stores per-particle rows only.
+read back from Zarr/Tethys storage, which stores per-particle rows only.
 
 Both are deterministic functions of the run configuration and the stored trajectory, so they
 are recomputed rather than approximated:
@@ -1274,58 +1274,58 @@ end
 """
     animate_hydrodynamic_dashboard(args...; kwargs...)
 
-Owned by the OCEAN half. GeoLarvalTracking calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
+Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
 """
-animate_hydrodynamic_dashboard(args...; kwargs...) = error("`animate_hydrodynamic_dashboard` is owned by GeoOceanModel, not by this package.")
+animate_hydrodynamic_dashboard(args...; kwargs...) = error("`animate_hydrodynamic_dashboard` is owned by TethysFlow, not by this package.")
 
 """
     animate_hydrodynamic_field(args...; kwargs...)
 
-Owned by the OCEAN half. GeoLarvalTracking calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
+Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
 """
-animate_hydrodynamic_field(args...; kwargs...) = error("`animate_hydrodynamic_field` is owned by GeoOceanModel, not by this package.")
+animate_hydrodynamic_field(args...; kwargs...) = error("`animate_hydrodynamic_field` is owned by TethysFlow, not by this package.")
 
 """
     plot_hydrodynamic_advection(args...; kwargs...)
 
-Owned by the OCEAN half. GeoLarvalTracking calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
+Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
 """
-plot_hydrodynamic_advection(args...; kwargs...) = error("`plot_hydrodynamic_advection` is owned by GeoOceanModel, not by this package.")
+plot_hydrodynamic_advection(args...; kwargs...) = error("`plot_hydrodynamic_advection` is owned by TethysFlow, not by this package.")
 
 """
     plot_hydrodynamic_diffusion(args...; kwargs...)
 
-Owned by the OCEAN half. GeoLarvalTracking calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
+Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
 """
-plot_hydrodynamic_diffusion(args...; kwargs...) = error("`plot_hydrodynamic_diffusion` is owned by GeoOceanModel, not by this package.")
+plot_hydrodynamic_diffusion(args...; kwargs...) = error("`plot_hydrodynamic_diffusion` is owned by TethysFlow, not by this package.")
 
 """
     plot_hydrodynamic_section(args...; kwargs...)
 
-Owned by the OCEAN half. GeoLarvalTracking calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
+Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
 """
-plot_hydrodynamic_section(args...; kwargs...) = error("`plot_hydrodynamic_section` is owned by GeoOceanModel, not by this package.")
+plot_hydrodynamic_section(args...; kwargs...) = error("`plot_hydrodynamic_section` is owned by TethysFlow, not by this package.")
 
 """
     plot_hydrodynamic_stratification(args...; kwargs...)
 
-Owned by the OCEAN half. GeoLarvalTracking calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
+Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
 """
-plot_hydrodynamic_stratification(args...; kwargs...) = error("`plot_hydrodynamic_stratification` is owned by GeoOceanModel, not by this package.")
+plot_hydrodynamic_stratification(args...; kwargs...) = error("`plot_hydrodynamic_stratification` is owned by TethysFlow, not by this package.")
 
 """
     plot_hydrodynamic_timeseries(args...; kwargs...)
 
-Owned by the OCEAN half. GeoLarvalTracking calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
+Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
 """
-plot_hydrodynamic_timeseries(args...; kwargs...) = error("`plot_hydrodynamic_timeseries` is owned by GeoOceanModel, not by this package.")
+plot_hydrodynamic_timeseries(args...; kwargs...) = error("`plot_hydrodynamic_timeseries` is owned by TethysFlow, not by this package.")
 
 """
     plot_hydrodynamic_tracers(args...; kwargs...)
 
-Owned by the OCEAN half. GeoLarvalTracking calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
+Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
 """
-plot_hydrodynamic_tracers(args...; kwargs...) = error("`plot_hydrodynamic_tracers` is owned by GeoOceanModel, not by this package.")
+plot_hydrodynamic_tracers(args...; kwargs...) = error("`plot_hydrodynamic_tracers` is owned by TethysFlow, not by this package.")
 
 """
     _larval_bathymetry(opts, store)
@@ -1381,22 +1381,22 @@ function _larval_bathymetry(opts::HydrodynamicOptions, store)
     # is this package's directory, is not shared with the ocean half, and cannot be rewritten
     # once it exists. Naming the store makes the product machine-shared, as every other
     # assimilated input is, and makes a second run a cache hit.
-    src = GeoDataSources.preferred_bathymetry_source(; lon_range = lon_r, lat_range = lat_r)
-    destination = joinpath(GeoDataSources.store_path(String(src)), "bathymetry.zarr")
+    src = Tethys.preferred_bathymetry_source(; lon_range = lon_r, lat_range = lat_r)
+    destination = joinpath(Tethys.store_path(String(src)), "bathymetry.zarr")
     arr = try
         ds = if ispath(destination)
-            GeoData.geoload(destination)
+            Tethys.geoload(destination)
         else
-            GeoDataSources.bathymetry_dataset(;
+            Tethys.bathymetry_dataset(;
                 source = src, lon_range = lon_r, lat_range = lat_r,
                 output_path = destination, verbose = false)
         end
         elev_var = haskey(ds.variables, "elevation") ? "elevation" :
-                   first(GeoData.variables_like(ds, ["elevation", "altitude", "z", "topo"]))
+                   first(Tethys.variables_like(ds, ["elevation", "altitude", "z", "topo"]))
         elev_ga = ds.variables[elev_var]
-        perm = GeoData.dim_permutation(elev_ga.dims, :lon, :lat)
-        lon_c, _ = GeoData.axis(ds, :lon)
-        lat_c, _ = GeoData.axis(ds, :lat)
+        perm = Tethys.dim_permutation(elev_ga.dims, :lon, :lat)
+        lon_c, _ = Tethys.axis(ds, :lon)
+        lat_c, _ = Tethys.axis(ds, :lat)
         raw = Array{Float64}(elev_ga.data)
         elev = ndims(raw) == 1 ? reshape(raw, :, 1) : permutedims(raw, perm)
         (elevation = elev, lon = lon_c, lat = lat_c)
@@ -1404,8 +1404,8 @@ function _larval_bathymetry(opts::HydrodynamicOptions, store)
         error("No seabed is available. The store carries no `bottom_height` and the central " *
               "lakehouse holds no bathymetry product for lon $(lon_r) lat $(lat_r) " *
               "($(sprint(showerror, err))). A larval run placed on a sea floor nobody " *
-              "measured would be a different simulation: run GeoOceanModelRun.jl once to " *
-              "assimilate a product, or fetch one with `GeoDataSources.fetch_input`.")
+              "measured would be a different simulation: run TethysFlowRun.jl once to " *
+              "assimilate a product, or fetch one with `Tethys.fetch_input`.")
     end
     println("  seabed: $(length(arr.lon)) x $(length(arr.lat)) grid, source $(src)")
     return (elevation = Float64.(arr.elevation),
@@ -1416,13 +1416,13 @@ end
 """
     _run_bathymetry_source(args...; kwargs...)
 
-Owned by the OCEAN half. GeoLarvalTracking calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
+Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
 """
-_run_bathymetry_source(args...; kwargs...) = error("`_run_bathymetry_source` is owned by GeoOceanModel, not by this package.")
+_run_bathymetry_source(args...; kwargs...) = error("`_run_bathymetry_source` is owned by TethysFlow, not by this package.")
 
 """
     expand_domain_with_buffer(args...; kwargs...)
 
-Owned by the OCEAN half. GeoLarvalTracking calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
+Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
 """
-expand_domain_with_buffer(args...; kwargs...) = error("`expand_domain_with_buffer` is owned by GeoOceanModel, not by this package.")
+expand_domain_with_buffer(args...; kwargs...) = error("`expand_domain_with_buffer` is owned by TethysFlow, not by this package.")

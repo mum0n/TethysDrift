@@ -23,12 +23,12 @@ complete and answers a question nobody asked. Callers must fail loudly instead, 
 
 To run, pass one explicitly:
 
-    julia --project=. GeoOceanModelRun.jl --config=configs/scotian_shelf.toml
+    julia --project=. TethysDriftRun.jl --config=configs/snowcrab.toml
 
-or place `ParticleTracking.toml` at the project root.
+or place `TethysDrift.toml` at the project root.
 """
 function find_default_config_path()::String
-    for p in ("ParticleTracking.toml", "ParticleTracking.config")
+    for p in ("TethysDrift.toml", "TethysDrift.config")
         isfile(p) && return p
     end
     ""
@@ -44,19 +44,16 @@ no statement of what it actually simulated -- it would be indistinguishable from
 was configured deliberately.
 
 Available configurations in this project:
-  configs/default.toml       Cape Breton : small box, low resolution, 3 days,
-                             keyless data (etopo2022, WOA23, open_meteo). For demos.
-  configs/scotian_shelf.toml  The full snow-crab Scotian Shelf domain, nwa_bathymetry
-                             and GLORYS12V1 (Copernicus Marine account required).
+  configs/default.toml       Cape Breton : small box, low resolution, 3 days. For demos.
+  configs/snowcrab.toml      The full snow-crab Scotian Shelf domain.
 
 Run with one of:
 
-    julia --project=. GeoOceanModelRun.jl --config=configs/scotian_shelf.toml
+    julia --project=. TethysDriftRun.jl --config=configs/snowcrab.toml
 
-or copy one to ParticleTracking.toml at the project root, which the loader picks up
+or copy one to TethysDrift.toml at the project root, which the loader picks up
 automatically. For a study of your own, copy the closest config and edit the sections the
-run depends on: [data] for datasets, [domain] and [grid] for the box and resolution, and
-[biology] for larval parameters.
+run depends on: [storage], [domain], and [biology] for larval parameters.
 """
 
 """
@@ -111,7 +108,7 @@ end
     resolve_config_name(config_file::AbstractString = "") -> String
 
 Extract the base configuration name from a config file path, or return
-the default configuration name (`"ParticleTracking"`) if unspecified or empty.
+the default configuration name (`"TethysDrift"`) if unspecified or empty.
 
 # Inputs
 - `config_file::AbstractString`: Path to a `.toml` file or empty string.
@@ -123,7 +120,7 @@ function resolve_config_name(config_file::AbstractString = "")::String
     cfg_path = isempty(strip(config_file)) ? find_default_config_path() : String(config_file)
     base = basename(cfg_path)
     stem = splitext(base)[1]
-    return isempty(stem) ? "ParticleTracking" : stem
+    return isempty(stem) ? "TethysDrift" : stem
 end
 
 
@@ -234,7 +231,7 @@ function get_default_configuration()::Dict{String, Any}
             "output_dir" => "",
             "storage_backend" => "zarr",
             "enable_checkpoint" => true,
-            "checkpoint_prefix" => "checkpoint_ParticleTracking",
+            "checkpoint_prefix" => "checkpoint_TethysDrift",
             "checkpoint_schedule_seconds" => 21600.0,
             "checkpoint_cleanup" => true
         ),

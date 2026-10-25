@@ -12,9 +12,8 @@ matrices, and spatial dispersal fields with:
 - Multi-run benchmarking and ensemble model averaging
 """
 
-using GeoData
-using GeoDataSources
-using GeoData.GeoDataTypes: GeoDataset, GeoArray, Dimension, CoordinateSystem
+using Tethys
+using Tethys.Types: GeoDataset, GeoArray, Dimension, CoordinateSystem
 using Zarr
 using JSON3
 using Dates
@@ -124,7 +123,7 @@ function open_storage(
         storage_path = endswith(output_path, ".zarr") ? String(output_path) :
             (endswith(output_path, ".jld2") ?
              replace(output_path, r"\.jld2$" => ".zarr") : output_path * ".zarr")
-        st = GeoData.open_geostorage(storage_path; backend = :zarr, read_only = read_only)
+        st = Tethys.open_geostorage(storage_path; backend = :zarr, read_only = read_only)
         return st.handle
     elseif backend == "geoparquet"
         storage_path = endswith(output_path, ".parquet") ? String(output_path) :
@@ -1352,27 +1351,27 @@ function compute_ensemble_model_average(
 end
 
 """
-    geopublish_lakehouse!(catalog::GeoDataSources.CatalogModule.GeoDataCatalog,
+    geopublish_lakehouse!(catalog::Tethys.CatalogModule.GeoDataCatalog,
                           storage_path::AbstractString;
                           key::Symbol,
                           name::String,
                           derived_from::Vector{Symbol} = Symbol[])
 
 Publish particle tracking simulation outputs (e.g. dispersal kernels, connectivity)
-directly into the GeoData Lakehouse repository under the `:derived` (Gold) tier.
+directly into the Tethys Lakehouse repository under the `:derived` (Gold) tier.
 """
-function geopublish_lakehouse!(catalog::GeoDataSources.CatalogModule.GeoDataCatalog,
+function geopublish_lakehouse!(catalog::Tethys.CatalogModule.GeoDataCatalog,
                                storage_path::AbstractString;
                                key::Symbol,
                                name::String,
                                derived_from::Vector{Symbol} = Symbol[])
-    return GeoDataSources.geopublish_dataset!(
+    return Tethys.geopublish_dataset!(
         catalog,
         storage_path;
         key = key,
         name = name,
         tier = :derived,
-        producer = "ParticleTracking.jl",
+        producer = "TethysDrift.jl",
         derived_from = derived_from,
         format = endswith(storage_path, ".parquet") ? :geoparquet : :zarr
     )

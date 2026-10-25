@@ -1,7 +1,7 @@
 """
     configuration.jl
 
-Centralized configuration for `ParticleTracking.jl`.
+Centralized configuration for `TethysDrift.jl`.
 
 Assembled from five files, one per kind of thing rather than one per stage:
 

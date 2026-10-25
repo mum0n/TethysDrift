@@ -21,10 +21,8 @@ Together these let the stage model be verified from the output rather than infer
 using CairoMakie
 using CairoMakie: Figure, Axis, heatmap!, lines!, scatter!, hlines!, vlines!, band!,
                   Legend, hist!, barplot!, text!
-# The larval state machine lives in this package, at `biology/larval_behavior.jl`. It was
-# reached through `using ParticleTracking: ...` before the split; that import would now be an
-# edge from the larval half back to the parent package, which is precisely what the split
-# removes, so those names are used directly.
+# The larval state machine lives in this package, at `biology/larval_behavior.jl`.
+# Those names are used directly.
 using Statistics: mean, var
 
 const _STAGE_ORDER = (:zoea1, :zoea2, :megalopa, :instar1_settled)
