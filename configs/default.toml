@@ -39,6 +39,8 @@ ocean_model = "../lakehouse/TethysFlow/default/hydrodynamics.zarr"
 storage_backend = "zarr"
 # Whether the trajectory store is written at all.
 enable_zarr = true
+# Explicit trajectory store path; empty derives `<output_dir>/particle_tracking.zarr`.
+zarr_path = ""
 # Field-output cadence, in seconds. Distinct from the checkpoint cadence below:
 # the two may legitimately differ.
 output_schedule_seconds = 21600.0
@@ -48,15 +50,12 @@ enable_checkpoint = true
 checkpoint_prefix = "checkpoint_TethysDrift"
 # State-checkpoint cadence, in seconds.
 checkpoint_schedule_seconds = 21600.0
+# Explicit checkpoint directory; empty derives `<output_dir>/checkpoints`.
+checkpoint_dir = ""
 # Whether older restart archives are purged when a new one is written.
 checkpoint_cleanup = true
 # A tag appended to the run's output names. Empty means "no tag".
 run_id = ""
-# The trajectory store and the restart archives are NOT named here. They are
-# derived from `output_dir` -- <output_dir>/particle_tracking.zarr and
-# <output_dir>/checkpoints -- so that a run's outputs are all in one place and
-# cannot be split across two directories. The resolved paths are recorded in the
-# run's `resolved_config.toml`.
 
 [domain]
 # The box the larvae are released into, and the region the run's outputs describe.
@@ -78,6 +77,7 @@ n_particles = 100             # Number of larvae released
 track_duration_days = 5.0     # How long the cohort is tracked, in days
 track_dt_seconds = 300.0      # Lagrangian integration time step (s)
 min_seabed_depth = 100.0      # Minimum water depth for a release site (m)
+buffer_km = 20.0              # Release buffer margin around strata (km)
 diffusivity_h = 10.0          # Horizontal eddy diffusivity (m^2/s)
 diffusivity_v = 0.0001        # Vertical eddy diffusivity (m^2/s)
 # Where in the water column a larva is released: "bottom", "range" or "surface".
@@ -137,6 +137,18 @@ larval_max_intermolt_days = 84.0 # The maximum viable duration of a pelagic stag
 settlement_min_depth = -250.0 # Deepest edge of the settlement habitat (m)
 settlement_max_depth = -50.0  # Shallowest edge of the settlement habitat (m)
 settlement_max_temp = 6.0     # Warmest bottom temperature a larva will settle at (°C)
+
+[visualization]
+# Diagnostic figures, interactive Leaflet HTML dashboard, and animation settings.
+interactive_map = true        # Export standalone interactive HTML5/Leaflet track map
+animate_hydro = false         # Render hydrodynamic field animation (owned by TethysFlow)
+anim_variable = "dashboard"   # Target variable for animation ("dashboard", "temperature", "speed")
+anim_fps = 10                 # Animation frame rate (frames per second)
+anim_format = "mp4"           # Animation container format ("mp4" or "gif")
+anim_depth = -2.5             # Depth level for animated horizontal slices (m)
+anim_overlay_particles = false # Overlay Lagrangian particle positions on animations
+anim_output_path = ""         # Optional custom animation output file path
+title = "Regional Marine Lagrangian Particle Tracking & Dispersion"
 
 [runtype]
 # What kind of run this is, and what makes it reproducible. The same section the ocean

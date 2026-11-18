@@ -10,7 +10,7 @@ using
     Statistics,
     LinearAlgebra,
     TOML,
-    JLD2,
+    JSON3,
     Interpolations,
     Dates,
     Downloads,
@@ -20,10 +20,6 @@ using Tethys: available_data, DataSource
 
 include("data/manifest.jl")
 using .Manifest
-
-using Oceananigans.Units
-using Oceananigans.Utils: prettytime
-using Oceananigans
 
 include("config/configuration.jl")
 include("data/store_reader.jl")

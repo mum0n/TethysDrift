@@ -32,6 +32,8 @@ ocean_model = "../lakehouse/TethysFlow/scotian_shelf/hydrodynamics.zarr"
 storage_backend = "zarr"
 # Whether the trajectory store is written at all.
 enable_zarr = true            # Persist Lagrangian larval trajectories to Zarr
+# Explicit trajectory store path; empty derives `<output_dir>/particle_tracking.zarr`.
+zarr_path = ""
 # Field-output cadence, in seconds. Distinct from the checkpoint cadence below:
 # the two may legitimately differ.
 output_schedule_seconds = 21600.0 # Field-output interval (seconds, 6 hours)
@@ -41,15 +43,22 @@ enable_checkpoint = true      # Save simulation checkpointer state
 checkpoint_prefix = "checkpoint_TethysDrift" # Checkpoint filename prefix
 # State-checkpoint cadence, in seconds.
 checkpoint_schedule_seconds = 0.0 # State checkpoint frequency in seconds (0 = match output)
+# Explicit checkpoint directory; empty derives `<output_dir>/checkpoints`.
+checkpoint_dir = ""
 # Whether older restart archives are purged when a new one is written.
 checkpoint_cleanup = true     # Automatically purge older intermediate checkpoints
 # A tag appended to the run's output names. Empty means "no tag".
 run_id = ""                   # Unique run identifier tag
-# The trajectory store and the restart archives are NOT named here. They are
-# derived from `output_dir` -- <output_dir>/particle_tracking.zarr and
-# <output_dir>/checkpoints -- so that a run's outputs are all in one place and
-# cannot be split across two directories. The resolved paths are recorded in the
-# run's `resolved_config.toml`.
+
+[domain]
+# Domain bounds and release buffer matching TethysFlow's `scotian_shelf.toml`.
+lon_min = -71.0               # Western domain boundary (°E)
+lon_max = -53.0               # Eastern domain boundary (°E)
+lat_min = 38.5                # Southern domain boundary (°N)
+lat_max = 50.0                # Northern domain boundary (°N)
+z_min = -400.0                # Maximum modeled depth (m, negative down)
+z_max = 0.0                   # Free surface elevation (m)
+buffer_km = 50.0              # Release buffer margin around domain / strata (km)
 
 [biology]
 # Snow crab larval cohort advection and behavior
@@ -107,6 +116,18 @@ larval_max_intermolt_days = 84.0  # The maximum viable duration of a pelagic sta
 settlement_min_depth = -500.0 # Deep bathymetric boundary for benthic settlement (m)
 settlement_max_depth = -10.0  # Shallow bathymetric boundary for benthic settlement (m)
 settlement_max_temp = 7.0     # Thermal ceiling for viable benthic settlement (°C)
+
+[visualization]
+# Diagnostic figures, interactive Leaflet HTML dashboard, and animation settings.
+interactive_map = true        # Export standalone interactive HTML5/Leaflet track map
+animate_hydro = false         # Render hydrodynamic field animation (owned by TethysFlow)
+anim_variable = "dashboard"   # Target variable for animation ("dashboard", "temperature", "speed")
+anim_fps = 10                 # Animation frame rate (frames per second)
+anim_format = "mp4"           # Animation container format ("mp4" or "gif")
+anim_depth = -10.0            # Depth level for animated horizontal slices (m)
+anim_overlay_particles = true # Overlay Lagrangian particle positions on animations
+anim_output_path = ""         # Optional custom animation output file path
+title = "Snow Crab (Chionoecetes opilio) Larval Dispersal & Connectivity"
 
 [runtype]
 # What kind of run this is, and what makes it reproducible. The same section the ocean

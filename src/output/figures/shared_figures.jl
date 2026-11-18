@@ -45,7 +45,7 @@ end
         title::Union{Nothing, AbstractString} = nothing
     ) -> Figure
 
-Generate a comprehensive 6-panel dashboard combining key hydrodynamic and Lagrangian diagnostics.
+Render a 6-panel dashboard of hydrodynamic and Lagrangian diagnostics.
 
 Panels:
 1. Horizontal current speed (|u_h|) with vector field quiver overlay
@@ -103,10 +103,16 @@ function plot_multi_panel_dashboard(
     speed_surf = Float64.(hydro.speed[:, :, k_surf] .* 100.0)
     mask_bathy!(speed_surf, bathy, k_surf)
     hm1 = heatmap!(ax1, lons, lats, speed_surf, colormap = :viridis, nan_color = :transparent)
-    quiver!(ax1, lons[1:3:end], lats[1:3:end],
-            Float64.(hydro.u[:, :, k_surf][1:3:end, 1:3:end] .* 100.0),
-            Float64.(hydro.v[:, :, k_surf][1:3:end, 1:3:end] .* 100.0),
-            color = :white, arrowsize = 8)
+    arrows2d!(
+        ax1,
+        lons[1:3:end],
+        lats[1:3:end],
+        Float64.(hydro.u[:, :, k_surf][1:3:end, 1:3:end] .* 100.0),
+        Float64.(hydro.v[:, :, k_surf][1:3:end, 1:3:end] .* 100.0);
+        tipwidth = 8,
+        tiplength = 8,
+        color = :white
+    )
     Colorbar(fig[1, 2], hm1, label = "cm/s", height = Relative(0.8))
 
     # Panel 2: Temperature + Isotherms

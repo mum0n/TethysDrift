@@ -72,13 +72,19 @@ function plot_particle_trajectories(
     # 2. Draw management strata outlines if provided
     if !isnothing(strata)
         for s in strata
-            if hasproperty(s, :polygon) && !isempty(s.polygon)
+            poly_lons = Float64[]
+            poly_lats = Float64[]
+            if hasproperty(s, :lons) && hasproperty(s, :lats) && !isempty(s.lons)
+                poly_lons = Float64.(s.lons)
+                poly_lats = Float64.(s.lats)
+            elseif hasproperty(s, :polygon) && !isempty(s.polygon)
                 poly_lons = [Float64(pt[1]) for pt in s.polygon]
                 poly_lats = [Float64(pt[2]) for pt in s.polygon]
+            end
+            if !isempty(poly_lons)
                 # Close the ring: an unclosed polygon renders as a gap, and a gap in
                 # a management boundary reads as an opening that is not there.
-                if !isempty(poly_lons) &&
-                   (poly_lons[1] != poly_lons[end] || poly_lats[1] != poly_lats[end])
+                if poly_lons[1] != poly_lons[end] || poly_lats[1] != poly_lats[end]
                     push!(poly_lons, poly_lons[1])
                     push!(poly_lats, poly_lats[1])
                 end
@@ -653,123 +659,19 @@ function plot_recruitment_summary(
 end
 
 """
-    _timeseries_value(frame::NamedTuple, i::Int, j::Int, k::Int, variable::Symbol) -> Float64
-
-Read one field of an extracted hydrodynamic frame at grid point `(i, j, k)`, normalising the
-scalars that the plots conventionally rescale (Brunt-Väisälä, diffusivity and speed are drawn in
-their scientific units of 10⁻⁴ and cm s⁻¹).
-"""
-@inline function _timeseries_value(frame::NamedTuple, i::Int, j::Int, k::Int, variable::Symbol)
-    v = if variable === :salinity || variable === :S
-        frame.salinity[i, j, k]
-    elseif variable === :stratification || variable === :N2
-        frame.stratification[i, j, k] * 1.0e4
-    elseif variable === :diffusion || variable === :kappa
-        frame.diffusion[i, j, k] * 1.0e4
-    elseif variable === :viscosity || variable === :nu
-        frame.viscosity[i, j, k] * 1.0e4
-    elseif variable === :speed
-        frame.speed[i, j, k] * 100.0
-    elseif variable === :density
-        frame.density[i, j, k]
-    elseif variable === :vorticity
-        frame.vorticity[i, j, k]
-    elseif variable === :w
-        frame.w[i, j, k]
-    else
-        frame.temperature[i, j, k]
-    end
-    return Float64(v)
-end
-
-"""
-    plot_hydrodynamic_hovmoller(
-        hydrodynamics::Any;
-        station = nothing, lon = -63.5, lat = 44.0,
-        variable = :temperature, max_frames = 240,
-        title = nothing, output_path = "outputs/hydrodynamic_hovmoller.png"
-    ) -> Figure
-
-Time–depth (Hovmöller) diagram of a hydrodynamic variable at a fixed station, built from the real
-snapshots.
-
-This is the canonical Eulerian diagnostic for a shelf model and the single most useful missing
-figure: it shows at once whether the simulation resolves the structures that matter here — the cold
-intermediate layer as a sloping isotherm band, the M2/S2 tide as horizontal banding, and any
-periodic or drifting behaviour. A time series alone cannot show which of those is present, because
-it collapses the vertical structure.
-
-# Inputs
-- `hydrodynamics`: Model output, or a path the extractor understands.
-- `station`: `(lon, lat)` tuple, or `nothing` to use `lon`/`lat`.
-- `variable`: `:temperature`, `:salinity`, `:speed`, `:w`, or `:density`.
-- `max_frames`: Cap on snapshots walked; they are evenly subsampled beyond this.
-- `output_path`: PNG path, or `nothing`.
-"""
-function plot_hydrodynamic_hovmoller(
-    hydrodynamics::Any;
-    station::Union{Nothing, Tuple{<:Real, <:Real}} = nothing,
-    lon::Real = -63.5,
-    lat::Real = 44.0,
-    variable::Symbol = :temperature,
-    max_frames::Int = 240,
-    title::Union{Nothing, AbstractString} = nothing,
-    output_path::Union{Nothing, AbstractString} = "outputs/hydrodynamic_hovmoller.png"
-)
-    first_frame = extract_hydrodynamic_dataset(hydrodynamics)
-    target_lon = !isnothing(station) ? Float64(station[1]) : Float64(lon)
-    target_lat = !isnothing(station) ? Float64(station[2]) : Float64(lat)
-    i_st = argmin(abs.(first_frame.lons .- target_lon))
-    j_st = argmin(abs.(first_frame.lats .- target_lat))
-
-    n_snap = isdefined(first_frame, :n_snapshots) ? first_frame.n_snapshots : length(first_frame.times)
-    idx = n_snap <= max_frames ? collect(1:n_snap) :
-          unique(round.(Int, range(1, n_snap, length = max_frames)))
-    length(idx) < 2 && (idx = [1, max(1, n_snap)])
-
-    zs = collect(Float64, first_frame.depths)
-    nz = length(zs)
-    M = fill(NaN, nz, length(idx))
-    hours = Float64[]
-    for (c, k) in enumerate(idx)
-        f = k == 1 ? first_frame :
-            extract_hydrodynamic_dataset(hydrodynamics; time_index = k)
-        push!(hours, first(f.times) / 3600.0)
-        for r in 1:nz
-            M[r, c] = _timeseries_value(f, i_st, j_st, r, variable)
-        end
-    end
-
-    var_title = uppercase(string(variable)[1:1]) * string(variable)[2:end]
-    fig = Figure(size = (980, 520), fontsize = 12)
-    ax = Axis(fig[1, 1],
-              title = something(title, "Time–Depth ($(var_title)) at " *
-                                      "($(round(first_frame.lons[i_st], digits=2))°E, " *
-                                      "$(round(first_frame.lats[j_st], digits=2))°N)"),
-              xlabel = "Simulation time (hours)", ylabel = "Depth (m)")
-    hm = heatmap!(ax, hours, zs, M; colormap = :balance,
-                   colorrange = _field_colorrange(M))
-    Colorbar(fig[1, 2], hm, label = var_title)
-    # Isobaths: shading the T–S–z space without them hides the structure this plot exists to show.
-    isotherms = variable === :temperature
-    isotherms && vlines!(ax, [12.42, 24.0], color = (:white, 0.35), linestyle = :dot,
-                         label = "M2 / S2")
-    isotherms && axislegend(ax, position = :rb)
-    isnothing(output_path) || (mkpath(dirname(output_path)); save(output_path, fig))
-    return fig
-end
-
-"""
     plot_bottom_temperature_map(hydrodynamics; depth = nothing, output_path = ...)
 
 Map of near-bed temperature across the domain.
 
-Settlement suitability in the larval model is driven by near-bed temperature, and the recruitment
-figures report *where* larvae settled but never the temperature field that decided it. Mapping it
-next to the settlement-density figure makes it possible to see whether a recruitment pattern
-follows bottom temperature or contradicts it.
+# Inputs
+- `hydrodynamics`: Extracted hydrodynamic `NamedTuple` or Zarr store path.
+- `depth`: Optional target depth (m); defaults to the deepest resolved level.
+- `domain_lon`, `domain_lat`: Longitude and latitude bounds.
+- `title`: Optional figure title.
+- `output_path`: PNG path, or `nothing`.
 
-Land is masked to NaN so the map shows the marine domain only.
+# Outputs
+- `Makie.Figure`: Near-bed temperature map.
 """
 function plot_bottom_temperature_map(
     hydrodynamics::Any;
@@ -779,17 +681,32 @@ function plot_bottom_temperature_map(
     title::Union{Nothing, AbstractString} = nothing,
     output_path::Union{Nothing, AbstractString} = "outputs/bottom_temperature_map.png"
 )
-    f = extract_hydrodynamic_dataset(hydrodynamics; depth = depth,
-                                    domain_lon = domain_lon, domain_lat = domain_lat)
+    f = extract_hydrodynamic_dataset(
+        hydrodynamics;
+        domain_lon = domain_lon,
+        domain_lat = domain_lat
+    )
     zs = collect(Float64, f.depths)
-    k = isnothing(depth) ? argmax(zs) : resolve_depth_index(zs, depth, nothing)  # deepest available
-    Tbot = permutedims(f.temperature[:, :, k])
+    k = isnothing(depth) ? argmin(zs) : argmin(abs.(zs .- Float64(depth)))
+    Tbot = f.temperature[:, :, k]
+    finite_vals = filter(isfinite, vec(Tbot))
+    cr = if isempty(finite_vals)
+        (0.0, 1.0)
+    else
+        lo, hi = extrema(finite_vals)
+        lo == hi ? (lo - 0.5, hi + 0.5) : (lo, hi)
+    end
     fig = Figure(size = (760, 520), fontsize = 12)
-    ax = Axis(fig[1, 1],
-              title = something(title, "Near-Bed Temperature (deepest resolved level, $(zs[k]) m)"),
-              xlabel = "Longitude (°E)", ylabel = "Latitude (°N)")
-    hm = heatmap!(ax, f.lons, f.lats, Tbot, colormap = :thermal;
-                   colorrange = _field_colorrange(Tbot))
+    ax = Axis(
+        fig[1, 1],
+        title = something(
+            title,
+            "Near-Bed Temperature (deepest resolved level, $(zs[k]) m)"
+        ),
+        xlabel = "Longitude (°E)",
+        ylabel = "Latitude (°N)"
+    )
+    hm = heatmap!(ax, f.lons, f.lats, Tbot; colormap = :thermal, colorrange = cr)
     Colorbar(fig[1, 2], hm, label = "Temperature (°C)")
     isnothing(output_path) || (mkpath(dirname(output_path)); save(output_path, fig))
     return fig
@@ -800,10 +717,14 @@ end
 
 Temperature–salinity (T–S) scatter of the domain, coloured by depth.
 
-The standard water-mass diagnostic. For this domain it answers whether the simulated water column
-contains the three masses the larvae and the shelf exchange depend on — cold fresh shelf water
-(Gulf of St. Lawrence), the cold intermediate layer, and warm salty slope water — and whether the
-model produces a continuous mixing line between them or an implausibly disconnected set.
+# Inputs
+- `hydrodynamics`: Extracted hydrodynamic `NamedTuple` or Zarr store path.
+- `domain_lon`, `domain_lat`: Longitude and latitude bounds.
+- `title`: Optional figure title.
+- `output_path`: PNG path, or `nothing`.
+
+# Outputs
+- `Makie.Figure`: Temperature–salinity scatter diagram.
 """
 function plot_temperature_salinity_diagram(
     hydrodynamics::Any;
@@ -812,16 +733,24 @@ function plot_temperature_salinity_diagram(
     title::Union{Nothing, AbstractString} = nothing,
     output_path::Union{Nothing, AbstractString} = "outputs/ts_diagram.png"
 )
-    f = extract_hydrodynamic_dataset(hydrodynamics; domain_lon = domain_lon, domain_lat = domain_lat)
+    f = extract_hydrodynamic_dataset(
+        hydrodynamics;
+        domain_lon = domain_lon,
+        domain_lat = domain_lat
+    )
     zs = collect(Float64, f.depths)
-    # Scatter every (lon, lat, depth) cell, so vectorise the 3-D fields rather than reducing.
+    nx, ny, _ = size(f.salinity)
     Sv = vec(f.salinity)
     Tv = vec(f.temperature)
-    Zv = repeat(zs, outer = div(length(Sv), length(zs)))
+    Zv = repeat(zs, inner = nx * ny)
 
     fig = Figure(size = (760, 560), fontsize = 12)
-    ax = Axis(fig[1, 1], title = something(title, "Temperature–Salinity Diagram"),
-              xlabel = "Salinity (psu)", ylabel = "Temperature (°C)")
+    ax = Axis(
+        fig[1, 1],
+        title = something(title, "Temperature–Salinity Diagram"),
+        xlabel = "Salinity (psu)",
+        ylabel = "Temperature (°C)"
+    )
     m = isfinite.(Tv) .& isfinite.(Sv)
     sc = scatter!(ax, Sv[m], Tv[m]; color = Zv[m], colormap = :viridis)
     Colorbar(fig[1, 2], sc, label = "Depth (m)")

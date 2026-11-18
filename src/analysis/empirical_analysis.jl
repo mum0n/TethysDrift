@@ -36,7 +36,6 @@ NetCDF/JLD2 export for snow crab (*Chionoecetes opilio*) Lagrangian particle tra
 """
 
 using NCDatasets
-using JLD2
 using Statistics
 using LinearAlgebra
 
@@ -507,7 +506,7 @@ function intersect_polygon_with_coastline(
         return (Float64.(poly_lons), Float64.(poly_lats))
     end
 
-    coast = isnothing(coastline) ? load_coastline_polygons() : coastline
+    coast = isnothing(coastline) ? Tethys.load_coastline_polygons() : coastline
 
     out_lons = Float64[]
     out_lats = Float64[]
@@ -655,6 +654,38 @@ function load_cfa_polygons(
     end
 
     return polygons
+end
+
+"""
+    get_strata_buffered_envelope(
+        strata_polys::AbstractVector{<:NamedTuple};
+        buffer_km::Real = 100.0
+    ) -> NamedTuple
+
+Compute the combined geographic bounding box of `strata_polys` and expand it outward by
+`buffer_km` kilometers via `Tethys.expand_domain_with_buffer`.
+
+# Inputs
+- `strata_polys::AbstractVector{<:NamedTuple}`: Polygon records with `.lon` or `.lons` and
+  `.lat` or `.lats` fields.
+- `buffer_km::Real`: Buffer distance in kilometers (default `100.0`).
+
+# Outputs
+- `NamedTuple`: `(lon_range = (lon_min, lon_max), lat_range = (lat_min, lat_max))`.
+"""
+function get_strata_buffered_envelope(
+    strata_polys::AbstractVector{<:NamedTuple};
+    buffer_km::Real = 100.0
+)
+    isempty(strata_polys) && error("Cannot compute buffered envelope for empty strata list.")
+    lon_min = minimum(hasproperty(p, :lon) ? p.lon[1] : minimum(p.lons) for p in strata_polys)
+    lon_max = maximum(hasproperty(p, :lon) ? p.lon[2] : maximum(p.lons) for p in strata_polys)
+    lat_min = minimum(hasproperty(p, :lat) ? p.lat[1] : minimum(p.lats) for p in strata_polys)
+    lat_max = maximum(hasproperty(p, :lat) ? p.lat[2] : maximum(p.lats) for p in strata_polys)
+    buf_lon, buf_lat = Tethys.expand_domain_with_buffer(
+        (lon_min, lon_max), (lat_min, lat_max); buffer_km = buffer_km
+    )
+    return (lon_range = buf_lon, lat_range = buf_lat)
 end
 
 """
@@ -824,7 +855,7 @@ end
         strata_definitions::Union{Nothing, AbstractVector{<:NamedTuple}} = nothing
     )
 
-Export a comprehensive, CF-compliant NetCDF archive containing:
+Write a CF-compliant NetCDF4 archive containing:
 1. Gridded model velocity & turbulent diffusivity fields.
 2. Gridded larval recruitment & retention metrics.
 3. Gridded larval thermal exposure metrics.
@@ -899,99 +930,99 @@ function export_larval_dispersal_netcdf(
         v_time[:] = trajectories.times
 
         # ── Group 1: Empirical Movement & Dispersion Fields ──────────────────
-        v_u_emp = defVar(ds, "emp_u", Float64, ("lon", "lat"))
+        v_u_emp = defVar(ds, "emp_u", Float32, ("lon", "lat"); shuffle = true, deflatelevel = 7)
         v_u_emp.attrib["long_name"] = "Mean Empirical Zonal Velocity"
         v_u_emp.attrib["units"] = "m s-1"
-        v_u_emp[:, :] = emp_mov.u_mean
+        v_u_emp[:, :] = Float32.(emp_mov.u_mean)
 
-        v_v_emp = defVar(ds, "emp_v", Float64, ("lon", "lat"))
+        v_v_emp = defVar(ds, "emp_v", Float32, ("lon", "lat"); shuffle = true, deflatelevel = 7)
         v_v_emp.attrib["long_name"] = "Mean Empirical Meridional Velocity"
         v_v_emp.attrib["units"] = "m s-1"
-        v_v_emp[:, :] = emp_mov.v_mean
+        v_v_emp[:, :] = Float32.(emp_mov.v_mean)
 
-        v_diff_emp = defVar(ds, "emp_diffusivity", Float64, ("lon", "lat"))
+        v_diff_emp = defVar(ds, "emp_diffusivity", Float32, ("lon", "lat"); shuffle = true, deflatelevel = 7)
         v_diff_emp.attrib["long_name"] = "Mean Empirical Turbulent Diffusivity"
         v_diff_emp.attrib["units"] = "m2 s-1"
-        v_diff_emp[:, :] = emp_mov.diffusivity
+        v_diff_emp[:, :] = Float32.(emp_mov.diffusivity)
 
-        v_counts = defVar(ds, "particle_transit_count", Int32, ("lon", "lat"))
+        v_counts = defVar(ds, "particle_transit_count", Int32, ("lon", "lat"); shuffle = true, deflatelevel = 7)
         v_counts.attrib["long_name"] = "Particle Transit Step Count"
         v_counts[:, :] = Int32.(emp_mov.sample_count)
 
         # ── Group 2: Gridded Recruitment & Retention Metrics ─────────────────
-        v_rel = defVar(ds, "release_density", Int32, ("lon", "lat"))
+        v_rel = defVar(ds, "release_density", Int32, ("lon", "lat"); shuffle = true, deflatelevel = 7)
         v_rel.attrib["long_name"] = "Natal Spawning Release Density"
         v_rel[:, :] = Int32.(rec_met.release_density)
 
-        v_set = defVar(ds, "settlement_density", Int32, ("lon", "lat"))
+        v_set = defVar(ds, "settlement_density", Int32, ("lon", "lat"); shuffle = true, deflatelevel = 7)
         v_set.attrib["long_name"] = "Larval Settlement Density"
         v_set[:, :] = Int32.(rec_met.settlement_density)
 
-        v_succ = defVar(ds, "successful_recruitment_density", Int32, ("lon", "lat"))
+        v_succ = defVar(ds, "successful_recruitment_density", Int32, ("lon", "lat"); shuffle = true, deflatelevel = 7)
         v_succ.attrib["long_name"] = "Successful Benthic Recruitment Density"
         v_succ[:, :] = Int32.(rec_met.successful_settlement_density)
 
-        v_ret = defVar(ds, "retention_rate", Float64, ("lon", "lat"))
+        v_ret = defVar(ds, "retention_rate", Float32, ("lon", "lat"); shuffle = true, deflatelevel = 7)
         v_ret.attrib["long_name"] = "Cell Self-Retention Rate"
         v_ret.attrib["units"] = "fraction (0-1)"
-        v_ret[:, :] = rec_met.retention_rate
+        v_ret[:, :] = Float32.(rec_met.retention_rate)
 
-        v_age = defVar(ds, "mean_settlement_age_days", Float64, ("lon", "lat"))
+        v_age = defVar(ds, "mean_settlement_age_days", Float32, ("lon", "lat"); shuffle = true, deflatelevel = 7)
         v_age.attrib["long_name"] = "Mean Settlement Age of Recruits"
         v_age.attrib["units"] = "days"
-        v_age[:, :] = rec_met.mean_settlement_age_days
+        v_age[:, :] = Float32.(rec_met.mean_settlement_age_days)
 
         # ── Group 3: Gridded Thermal Exposure & Mortality ────────────────────
-        v_dd = defVar(ds, "mean_degree_days", Float64, ("lon", "lat"))
+        v_dd = defVar(ds, "mean_degree_days", Float32, ("lon", "lat"); shuffle = true, deflatelevel = 7)
         v_dd.attrib["long_name"] = "Mean In-Situ Accumulated Degree-Days"
         v_dd.attrib["units"] = "degC days"
-        v_dd[:, :] = therm_met.mean_degree_days
+        v_dd[:, :] = Float32.(therm_met.mean_degree_days)
 
-        v_temp_exp = defVar(ds, "mean_exposure_temperature", Float64, ("lon", "lat"))
+        v_temp_exp = defVar(ds, "mean_exposure_temperature", Float32, ("lon", "lat"); shuffle = true, deflatelevel = 7)
         v_temp_exp.attrib["long_name"] = "Mean Ambient Temperature Exposure"
         v_temp_exp.attrib["units"] = "degree_Celsius"
-        v_temp_exp[:, :] = therm_met.mean_exposure_temperature
+        v_temp_exp[:, :] = Float32.(therm_met.mean_exposure_temperature)
 
-        v_temp_max = defVar(ds, "max_exposure_temperature", Float64, ("lon", "lat"))
+        v_temp_max = defVar(ds, "max_exposure_temperature", Float32, ("lon", "lat"); shuffle = true, deflatelevel = 7)
         v_temp_max.attrib["long_name"] = "Maximum Ambient Temperature Exposure"
         v_temp_max.attrib["units"] = "degree_Celsius"
-        v_temp_max[:, :] = therm_met.max_exposure_temperature
+        v_temp_max[:, :] = Float32.(therm_met.max_exposure_temperature)
 
-        v_mort = defVar(ds, "thermal_mortality_fraction", Float64, ("lon", "lat"))
+        v_mort = defVar(ds, "thermal_mortality_fraction", Float32, ("lon", "lat"); shuffle = true, deflatelevel = 7)
         v_mort.attrib["long_name"] = "Thermal Stress Mortality Fraction"
         v_mort.attrib["units"] = "fraction (0-1)"
-        v_mort[:, :] = therm_met.thermal_mortality_fraction
+        v_mort[:, :] = Float32.(therm_met.thermal_mortality_fraction)
 
         # ── Group 4: Macro-Regional Connectivity Matrix ──────────────────────
-        v_conn = defVar(ds, "connectivity_matrix", Float64, ("src_strata", "dst_strata"))
+        v_conn = defVar(ds, "connectivity_matrix", Float32, ("src_strata", "dst_strata"); shuffle = true, deflatelevel = 7)
         v_conn.attrib["long_name"] = "Inter-Regional Transition Probability Matrix (P_ij)"
         v_conn.attrib["units"] = "probability fraction (0-1)"
-        v_conn[:, :] = conn_met.matrix
+        v_conn[:, :] = Float32.(conn_met.matrix)
 
         # ── Group 5: Raw Particle Trajectories ───────────────────────────────
-        v_p_lon = defVar(ds, "particle_lon", Float64, ("particle", "time"))
+        v_p_lon = defVar(ds, "particle_lon", Float32, ("particle", "time"); shuffle = true, deflatelevel = 7)
         v_p_lon.attrib["long_name"] = "Lagrangian Particle Longitude"
         v_p_lon.attrib["units"] = "degrees_east"
-        v_p_lon[:, :] = trajectories.lons
+        v_p_lon[:, :] = Float32.(trajectories.lons)
 
-        v_p_lat = defVar(ds, "particle_lat", Float64, ("particle", "time"))
+        v_p_lat = defVar(ds, "particle_lat", Float32, ("particle", "time"); shuffle = true, deflatelevel = 7)
         v_p_lat.attrib["long_name"] = "Lagrangian Particle Latitude"
         v_p_lat.attrib["units"] = "degrees_north"
-        v_p_lat[:, :] = trajectories.lats
+        v_p_lat[:, :] = Float32.(trajectories.lats)
 
-        v_p_depth = defVar(ds, "particle_depth", Float64, ("particle", "time"))
+        v_p_depth = defVar(ds, "particle_depth", Float32, ("particle", "time"); shuffle = true, deflatelevel = 7)
         v_p_depth.attrib["long_name"] = "Lagrangian Particle Depth"
         v_p_depth.attrib["units"] = "meters"
-        v_p_depth[:, :] = trajectories.depths
+        v_p_depth[:, :] = Float32.(trajectories.depths)
 
-        v_p_temp = defVar(ds, "particle_temperature", Float64, ("particle", "time"))
+        v_p_temp = defVar(ds, "particle_temperature", Float32, ("particle", "time"); shuffle = true, deflatelevel = 7)
         v_p_temp.attrib["long_name"] = "Ambient In-Situ Temperature"
         v_p_temp.attrib["units"] = "degree_Celsius"
         temp_matrix = hasproperty(trajectories, :temperatures) && !isnothing(trajectories.temperatures) ?
                       trajectories.temperatures : fill(4.0, n_particles, n_times)
-        v_p_temp[:, :] = temp_matrix
+        v_p_temp[:, :] = Float32.(temp_matrix)
 
-        v_p_dd = defVar(ds, "particle_degree_days", Float64, ("particle", "time"))
+        v_p_dd = defVar(ds, "particle_degree_days", Float32, ("particle", "time"); shuffle = true, deflatelevel = 7)
         v_p_dd.attrib["long_name"] = "Cumulative Thermal Degree-Days"
         v_p_dd.attrib["units"] = "degC days"
         dd_matrix = hasproperty(trajectories, :degree_days_timeseries) && !isnothing(trajectories.degree_days_timeseries) ?
@@ -999,7 +1030,7 @@ function export_larval_dispersal_netcdf(
                     (hasproperty(trajectories, :degree_days) && trajectories.degree_days isa AbstractMatrix ?
                      trajectories.degree_days :
                      repeat(hasproperty(trajectories, :degree_days) ? trajectories.degree_days : fill(40.0, n_particles), 1, n_times))
-        v_p_dd[:, :] = dd_matrix
+        v_p_dd[:, :] = Float32.(dd_matrix)
 
         # Global Attributes
         ds.attrib["title"] = "Snow Crab Larval Dispersal, Empirical Movement, & Demographic Connectivity"
@@ -1025,7 +1056,7 @@ function export_larval_dispersal_netcdf(
         ds.attrib["configuration"] = config_str
     end
 
-    println("Exported comprehensive larval dispersal NetCDF to $(output_filename)")
+    println("Exported larval dispersal NetCDF4 archive to $(output_filename)")
     return output_filename
 end
 
@@ -1040,7 +1071,7 @@ end
     )
 
 Save full empirical movement, recruitment, thermal, connectivity diagnostics,
-and simulation configuration metadata to JLD2.
+and simulation configuration metadata to Zarr/Arrow via `Tethys.write_data`.
 """
 function export_larval_dispersal_jld2(
     output_filename::AbstractString;
@@ -1070,15 +1101,24 @@ function export_larval_dispersal_jld2(
         load_configuration()
     end
 
-    JLD2.jldsave(output_filename;
-        trajectories = trajectories,
-        empirical_movement = emp_mov,
-        recruitment_metrics = rec_met,
-        thermal_metrics = therm_met,
-        connectivity = conn_met,
-        configuration = cfg_dict
+    target_path = endswith(lowercase(output_filename), ".jld2") ?
+        replace(output_filename, r"\.jld2$"i => ".zarr") : String(output_filename)
+    be = endswith(lowercase(target_path), ".arrow") || endswith(lowercase(target_path), ".feather") ?
+        :arrow : :zarr
+    Tethys.write_data(
+        target_path,
+        Dict(
+            "trajectories" => trajectories,
+            "empirical_movement" => emp_mov,
+            "recruitment_metrics" => rec_met,
+            "thermal_metrics" => therm_met,
+            "connectivity" => conn_met,
+            "configuration" => cfg_dict
+        );
+        backend = be,
+        overwrite = true
     )
 
-    println("Exported larval dispersal JLD2 bundle to $(output_filename)")
-    return output_filename
+    println("Exported larval dispersal bundle ($(be)) to $(target_path)")
+    return target_path
 end

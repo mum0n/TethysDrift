@@ -82,7 +82,7 @@ const PELAGIC_INTERMOLT_DAYS = (0.0, 36.0, 36.0, 42.0)
 The baseline daily mortality rate, in day⁻¹, for the pelagic stages
 `[zoea1, zoea2, megalopa]`.
 
-Zoea I and zoea II carry the same rate and the megalopa is more robust.
+Zoea I and zoea II share the same rate; the megalopa carries a lower baseline hazard.
 """
 const PELAGIC_BASELINE_HAZARDS = (0.020, 0.020, 0.015)
 
@@ -146,7 +146,10 @@ the final entry). The egg, which is brooded and never modelled here, has no rate
     isempty(hazards) && return 0.02
     k = molt_stage_index(stage)
     if k == 0
-        return stage === :instar1_settled ? Float64(hazards[end]) : 0.0
+        if stage === :instar1_settled
+            return length(hazards) >= 4 ? Float64(hazards[4]) : 0.0015
+        end
+        return 0.0
     end
     return Float64(hazards[min(k, length(hazards))])
 end
@@ -1503,7 +1506,7 @@ columns and never on emergent land.
 - `ascent_target_depth::Real`: Target epipelagic depth in meters (default -10.0 m).
 - `min_seabed_depth::Real`: Minimum water depth in meters (default 100.0 m, min 0.0 m).
 - `buffer_km::Real`: Spatial buffer distance in km beyond stratum/domain bounds (default 0.0 km).
-- `bathymetry`: Bathymetry source (`NamedTuple` of `elevation`/`lon`/`lat`, a `GeoDataset`,
+- `bathymetry`: Bathymetry source (`NamedTuple` of `elevation`/`lon`/`lat`, a `TethysDataset`,
   an elevation `Function` `(lon, lat) -> z`, or `nothing`).
 - `bathymetry_fn`: Alias for `bathymetry`.
 - `coastline`: Optional coastline multi-polygon definitions.
@@ -1525,8 +1528,8 @@ function initialize_larval_particles(
     ascent_target_depth::Real = -10.0,
     min_seabed_depth::Real = 100.0,
     buffer_km::Real = 0.0,
-    bathymetry::Union{Nothing, Function, NamedTuple, GeoDataset} = nothing,
-    bathymetry_fn::Union{Nothing, Function, NamedTuple, GeoDataset} = nothing,
+    bathymetry::Union{Nothing, Function, NamedTuple, TethysDataset} = nothing,
+    bathymetry_fn::Union{Nothing, Function, NamedTuple, TethysDataset} = nothing,
     coastline::Union{Nothing, AbstractVector{<:NamedTuple}} = nothing,
     stratum::Union{Nothing, NamedTuple, Symbol, AbstractString} = nothing,
     stage::Symbol = :zoea1,
@@ -1562,7 +1565,7 @@ function initialize_larval_particles(
     # Auto-resolve bathymetry if not explicitly provided. There is no default file: a
     # hard-coded path would let two callers disagree about which product they read, and
     # nothing downstream could tell. Depth-dependent seeding therefore requires the caller to
-    # state its sea floor -- through `GeoDataSources`, which decides which product and file.
+    # state its sea floor -- through `Tethys`, which decides which product and file.
     resolved_bathy = if !isnothing(bathymetry)
         bathymetry
     elseif !isnothing(bathymetry_fn)
@@ -1595,7 +1598,7 @@ function initialize_larval_particles(
 
     # Apply spatial buffer if buffer_km > 0
     eff_lon_range, eff_lat_range = if buffer_km > 0.0
-        expand_domain_with_buffer(raw_lon_range, raw_lat_range, buffer_km = buffer_km)
+        Tethys.expand_domain_with_buffer(raw_lon_range, raw_lat_range, buffer_km = buffer_km)
     else
         (raw_lon_range, raw_lat_range)
     end
@@ -1607,9 +1610,9 @@ function initialize_larval_particles(
     h_min = max(0.0, Float64(min_seabed_depth))
 
     # Fast deterministic marine grid sampling if a dataset is available and there is no strict
-    # unbuffered polygon. The sampling takes a `GeoDataset`, so a run resolves one through
-    # `GeoDataSources.bathymetry_dataset` and passes it; nothing here opens a file.
-    use_grid_sampling = (resolved_bathy isa GeoDataset) &&
+    # unbuffered polygon. The sampling takes a `TethysDataset`, so a run resolves one through
+    # `Tethys.bathymetry_dataset` and passes it; nothing here opens a file.
+    use_grid_sampling = (resolved_bathy isa TethysDataset) &&
                         (isnothing(resolved_stratum_poly) || buffer_km > 0.0)
 
     if use_grid_sampling && isnothing(resolved_stratum_poly)
@@ -1630,7 +1633,7 @@ function initialize_larval_particles(
     else
         bathy_fn = if resolved_bathy isa Function
             resolved_bathy
-        elseif resolved_bathy isa GeoDataset
+        elseif resolved_bathy isa TethysDataset
             Tethys.get_bathymetry_interpolator(resolved_bathy)
         elseif resolved_bathy isa NamedTuple
             # Arrays, in the `(elevation, lon, lat)` contract `bathymetry_arrays` returns.
@@ -2007,7 +2010,7 @@ function track_larval_cohort(
             # hazard, and is no longer subject to a developmental penalty for failing to
             # leave a pelagic stage.
             pelagic = is_pelagic_stage(cur_stage)
-            stage_mort_factor = larval_baseline_hazard(stage = cur_stage,
+            stage_mort_factor = larval_baseline_hazard(cur_stage;
                                                       hazards = larval_baseline_hazards)
             overage = pelagic ?
                       larval_overage_hazard_rate(days_in_stage[p];
@@ -2069,26 +2072,14 @@ function track_larval_cohort(
                     molt_sched,
                     developmental_u[p];
                     days_in_stage = days_in_stage[p],
-                    min_stage_days = min_stage_days_for(stage = cur_stage,
-                                                        schedule = intermolt_days_larval))
-                if new_stage != cur_stage
-                    # A new stage: the clock for the calendar gate restarts, and so
-                    # does the degree-day accumulation.
-                    days_in_stage[p] = 0.0
-                    current_degree_days[p] = 0.0
-                end
+                    min_stage_days = min_stage_days_for(cur_stage, intermolt_days_larval))
 
-                if new_stage != cur_stage
-                    # Record survival fraction across stage molt
-                    stage_survival[p] = traj_surv[p, s + 1]
-                end
-
-                # Settlement evaluation for competent larvae
-                # Competence uses this larva's own megalopa->settle quantile, so it stays
-                # consistent with the stage assigned just above.
-                is_competent = (new_stage == :instar1_settled) ||
-                               (cur_stage == :megalopa &&
-                                developmental_u[p] <= molt_probability(molt_sched[3], current_degree_days[p]))
+                # Settlement evaluation for competent larvae.
+                # Competence begins once a megalopa passes both its calendar gate and thermal
+                # degree-day gate (so `update_larval_stage` proposes `:instar1_settled`), and
+                # persists across steps until settlement succeeds or `competence_window_days`
+                # expires.
+                is_competent = (competence_onset_step[p] >= 0) || (new_stage == :instar1_settled)
 
                 if is_competent
                     if competence_onset_step[p] < 0
@@ -2126,6 +2117,9 @@ function track_larval_cohort(
                         current_settlement[p] = :settled_successful
                         current_settlement_age[p] = t_current
                         cur_stage = :instar1_settled
+                        days_in_stage[p] = 0.0
+                        current_degree_days[p] = 0.0
+                        stage_survival[p] = traj_surv[p, s + 1]
                     elseif days_competent > competence_window_days
                         # Competence search window expired without reaching nursery habitat
                         current_settlement[p] = :settled_unsuitable
@@ -2138,6 +2132,11 @@ function track_larval_cohort(
                         cur_stage = :megalopa
                     end
                 else
+                    if new_stage != cur_stage
+                        days_in_stage[p] = 0.0
+                        current_degree_days[p] = 0.0
+                        stage_survival[p] = traj_surv[p, s + 1]
+                    end
                     cur_stage = new_stage
                 end
             end
@@ -2604,7 +2603,7 @@ larva, in the form the sibling IBM uses.
 
 # Mathematical Formulation
 ```math
-\\mu(T) = \\mu_{\\text{base}} \\exp\\left( \\frac{1}{2}\\left(\\frac{T - T_{\\text{opt}}}{\\sigma_T}\\right)^{2} \\right)
+\\mu(T) = \\mu_{\\text{base}} \\left(1 + \\frac{1}{2}\\left(\\frac{T - T_{\\text{opt}}}{\\sigma_T}\\right)^{2}\\right)
         + \\mu_{\\text{overage}}
 ```
 where \$\\mu_{\\text{overage}}\$ is the developmental over-age penalty, zero unless the
@@ -2613,8 +2612,8 @@ larva has been in its stage longer than the maximum viable intermolt duration.
 # Calibration Notes
 - **Survival optimum** \$T_{\\text{opt}} = 11^\\circ\\text{C}\$, \$\\sigma_T = 3.5^\\circ\\text{C}\$:
   the pelagic larval survival optimum is 10-12 °C (Ouellet & Sainte-Marie, 2018). The
-  multiplier is one at the optimum and grows away from it in BOTH directions, so cold
-  water is penalised too: a larva at 5 °C faces \$\\exp(0.5 (6/3.5)^2) = 4.35\$ times the
+  quadratic multiplier is one at the optimum and grows away from it in both directions,
+  matching `TethysBio`: a larva at 5 °C faces \$1 + 0.5 (6/3.5)^2 \\approx 2.47\$ times the
   baseline hazard.
 - This replaces the earlier form, \$\\mu_{\\text{base}} \\exp(\\beta \\max(0, T - 7)) +
   \\mu_{\\text{cold}} \\max(0, -1.5 - T)\$, which was the OPPOSITE in shape: it took
@@ -2647,6 +2646,6 @@ function larval_thermal_mortality_rate(
 )
     T = Float64(temperature_celsius)
     sigma = max(0.5, Float64(temp_sigma))
-    thermal_mult = exp(0.5 * ((T - Float64(temp_opt)) / sigma)^2)
+    thermal_mult = 1.0 + 0.5 * ((T - Float64(temp_opt)) / sigma)^2
     return Float64(base_mortality * thermal_mult + Float64(overage_hazard))
 end

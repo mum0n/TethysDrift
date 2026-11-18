@@ -66,6 +66,7 @@ function display_help(io::IO = stdout)
       julia --project=. TethysDriftRun.jl [flags]
 
     Verbs:
+      --all        Run tracking, metrics, and figure rendering in sequence (default).
       --rerun      Run the tracking again, reusing the existing hydrodynamic store.
       --force      Same, and overwrite the stored results rather than skipping them.
       --overwrite  Alias for --force: overwrite stored results and re-track from t = 0.
@@ -84,10 +85,10 @@ function display_help(io::IO = stdout)
 
     Configuration:
       --config=FILE        A path, or a name resolved against configs/.
-      --hydro-file=PATH    The realized ocean simulation to track through. REQUIRED for
-                          --rerun, --force and --quick: this is the only coupling with
-                          TethysFlow, and it is a path. Its metadata states the domain, so
-                          the ocean half's configuration is never read here.
+      --hydro-file=PATH    Optional override for `[storage] ocean_model` in the config
+                          (aliases: `--hydro_path=PATH`, `--hydro-path=PATH`,
+                          `--hydro_file=PATH`). May be a `.zarr` store or a run
+                          directory containing `hydrodynamics.zarr`.
       --save-config[=D]    Write the fully-resolved configuration, then exit.
 
     Two configurations:
@@ -117,7 +118,7 @@ function parse_args(args::Vector{String})
     out = Dict{String, Any}(
         "verb" => nothing, "config" => "", "hydro_file" => "", "save_config" => nothing,
         "blank_state" => false, "help" => false)
-    verbs = Set(["--rerun", "--force", "--overwrite", "--quick", "--viz"])
+    verbs = Set(["--all", "--rerun", "--force", "--overwrite", "--quick", "--viz"])
     for a in args
         if a in verbs
             verb_name = a == "--overwrite" ? "force" : replace(a, "--" => "")
@@ -135,7 +136,7 @@ function parse_args(args::Vector{String})
             out["save_config"] = split(a, "=", limit = 2)[2]
         elseif startswith(a, "--config=")
             out["config"] = split(a, "=", limit = 2)[2]
-        elseif startswith(a, "--hydro-file=")
+        elseif any(p -> startswith(a, p), ("--hydro-file=", "--hydro_file=", "--hydro-path=", "--hydro_path="))
             out["hydro_file"] = split(a, "=", limit = 2)[2]
         else
             error("Unknown flag: $(a). Run with --help.")
@@ -198,6 +199,10 @@ function clear_run_state(opts::HydrodynamicOptions; blank_state::Bool = false,
     out_dir = opts.output_dir
     tag = !isempty(opts.run_id) ? "_$(opts.run_id)" : ""
     results = [opts.zarr_path,
+               joinpath(out_dir, "larval_trajectories.zarr"),
+               joinpath(out_dir, "larval_trajectories$(tag).zarr"),
+               joinpath(out_dir, "larval_dispersal_analysis.zarr"),
+               joinpath(out_dir, "larval_dispersal_analysis.nc"),
                joinpath(out_dir, "larval_trajectories.jld2"),
                joinpath(out_dir, "larval_trajectories$(tag).jld2")]
     result_globs = isempty(strip(opts.checkpoint_dir)) ? String[] :
@@ -242,41 +247,50 @@ function main(args::Vector{String})
         return nothing
     end
 
-    isnothing(flags["verb"]) && return display_help()
+    verb = something(flags["verb"], "all")
 
-    if flags["blank_state"] && flags["verb"] == "viz"
+    if flags["blank_state"] && verb == "viz"
         error("--viz renders the figures from the stored results, so it cannot also wipe " *
               "them. Use --rerun or --force with --blank_state.")
     end
-    if flags["blank_state"] && flags["verb"] == "quick"
+    if flags["blank_state"] && verb == "quick"
         error("--quick writes nothing that a later --rerun would need, so it cannot also " *
               "wipe a previous run's state. Use --rerun or --force with --blank_state.")
+    end
+
+    # The one coupling with the ocean half, and it is a path. Defaults to `[storage]
+    # ocean_model` from the configuration file; a CLI `--hydro-file` / `--hydro_path`
+    # overrides it.
+    hydro = if !isempty(strip(flags["hydro_file"]))
+        flags["hydro_file"]
+    else
+        TethysDrift.resolve_hydro_model_path(opts, "hydrodynamics.zarr")[1]
+    end
+    if !isempty(strip(hydro)) && isdir(hydro) &&
+       !isfile(joinpath(hydro, ".zgroup")) && isdir(joinpath(hydro, "hydrodynamics.zarr"))
+        hydro = joinpath(hydro, "hydrodynamics.zarr")
+    end
+    needs_hydro = verb in ("all", "rerun", "force", "quick")
+    if needs_hydro && isempty(strip(hydro))
+        error("--$(verb) needs the location of a realized ocean simulation. Set " *
+              "`[storage] ocean_model` in the configuration or pass --hydro-file=PATH " *
+              "(or --hydro_path=PATH), produced by TethysFlowRun.jl.")
     end
 
     println("="^73)
     println(" TethysDrift")
     println("="^73)
-    println(" Verb:       --$(flags["verb"])")
+    println(" Verb:       --$(verb)")
     println(" Config:     $(cfg_file)")
-    println(" Hydro file: $(isempty(flags["hydro_file"]) ? "(not given)" : flags["hydro_file"])")
+    println(" Hydro file: $(isempty(strip(hydro)) ? "(not given)" : hydro)")
     println("="^73)
 
-    # The one coupling with the ocean half, and it is a path. Everything about the ocean --
-    # domain, grid, bathymetry -- comes from that file's metadata, so the ocean half's own
-    # configuration is never opened here.
-    hydro = flags["hydro_file"]
-    needs_hydro = flags["verb"] in ("rerun", "force", "quick")
-    if needs_hydro && isempty(strip(hydro))
-        error("--$(flags["verb"]) needs the location of a realized ocean simulation. Pass " *
-              "--hydro-file=PATH, produced by GeoOceanModelRun.jl.")
-    end
-
-    if flags["verb"] == "rerun" || flags["verb"] == "force" || flags["verb"] == "quick"
+    if verb in ("all", "rerun", "force", "quick")
         # What a previous run left behind is cleared BEFORE the tracking starts, so the run
         # that follows sees the state it is meant to see. --force clears the model results
         # and keeps the downloaded store; --blank_state clears both, so the inputs are
         # fetched again. Either way the operator is asked first.
-        if flags["verb"] == "force" || flags["blank_state"]
+        if verb == "force" || flags["blank_state"]
             cleared = clear_run_state(opts; blank_state = flags["blank_state"])
             if !cleared
                 println("Aborted: the existing state was left untouched.")
@@ -285,12 +299,16 @@ function main(args::Vector{String})
         end
         # A rerun reads what the existing store says and skips what it already covers; --force /
         # --overwrite replaces stored results and re-tracks from t = 0. --quick runs tracking
-        # without metrics, for checking that the configuration still works.
+        # without metrics, for checking that the configuration still works. --all runs tracking,
+        # metrics, and figure rendering.
         trajs = run_segment_tracking(opts = opts, hydro_file = hydro)
-        if flags["verb"] != "quick"
+        if verb != "quick"
             run_segment_metrics(opts = opts, trajectories = trajs)
         end
-    elseif flags["verb"] == "viz"
+        if verb == "all"
+            render_all_figures(opts = opts)
+        end
+    elseif verb == "viz"
         render_all_figures(opts = opts)
     end
     return nothing

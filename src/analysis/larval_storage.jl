@@ -13,8 +13,13 @@ matrices, and spatial dispersal fields with:
 """
 
 using Tethys
-using Tethys.Types: GeoDataset, GeoArray, Dimension, CoordinateSystem
+using Tethys.Types: TethysDataset, TethysArray, Dimension, CoordinateSystem
 using Zarr
+
+const DEFAULT_ZARR_COMPRESSOR = Zarr.BloscCompressor(; cname = "zstd", clevel = 7, shuffle = 1)
+const DEFAULT_ZARR_STRING_COMPRESSOR = Zarr.ZstdCompressor(; level = 7)
+
+@inline _archive_array(x) = x isa AbstractArray{Float64} ? Float32.(x) : x
 using JSON3
 using Dates
 using Statistics
@@ -74,7 +79,7 @@ export
     load_connectivity_matrix,
     compare_runs,
     compute_ensemble_model_average,
-    geopublish_lakehouse!
+    publish_lakehouse_dataset!
 
 # ============================================================================
 # Core Storage Lifecycle
@@ -123,7 +128,7 @@ function open_storage(
         storage_path = endswith(output_path, ".zarr") ? String(output_path) :
             (endswith(output_path, ".jld2") ?
              replace(output_path, r"\.jld2$" => ".zarr") : output_path * ".zarr")
-        st = Tethys.open_geostorage(storage_path; backend = :zarr, read_only = read_only)
+        st = Tethys.open_tethys_storage(storage_path; backend = :zarr, read_only = read_only)
         return st.handle
     elseif backend == "geoparquet"
         storage_path = endswith(output_path, ".parquet") ? String(output_path) :
@@ -173,7 +178,8 @@ function initialize_storage_schema!(group::Union{Zarr.ZGroup, GeoParquetStorage}
         if !haskey(group, "runs")
             arr = Zarr.zcreate(
                 String, group, "runs", 0;
-                chunks = (1000,)
+                chunks = (1000,),
+                compressor = DEFAULT_ZARR_STRING_COMPRESSOR
             )
         end
     elseif group isa GeoParquetStorage
@@ -225,7 +231,7 @@ function save_simulation_run!(
     diff_v = Float64(hasproperty(opts, :diffusivity_v) ? opts.diffusivity_v : 1e-4)
     min_depth = Float64(hasproperty(opts, :min_seabed_depth) ? opts.min_seabed_depth : 100.0)
     seed_val = Int(hasproperty(opts, :seed) ? opts.seed : 42)
-    created_at = Dates.format(Dates.now(Dates.UTC), "yyyy-mm-ddTHH:MM:SSZ")
+    created_at = Dates.format(Dates.now(Dates.UTC), "yyyy-mm-ddTHH:MM:SS") * "Z"
 
     rec_rate = (!isnothing(metrics) && hasproperty(metrics, :settlement_success_rate)) ?
         Float64(metrics.settlement_success_rate) : 0.0
@@ -316,18 +322,22 @@ function save_simulation_run!(
             "times" => canonical_trajs.times
         )
             if !isnothing(data)
+                out_data = (name == "times") ? data : _archive_array(data)
                 if haskey(run_traj, name)
                     curr_arr = run_traj[name]
-                    if size(curr_arr) != size(data)
-                        Zarr.resize!(curr_arr, size(data)...)
+                    if size(curr_arr) != size(out_data)
+                        Zarr.resize!(curr_arr, size(out_data)...)
                     end
-                    curr_arr[:] = data
+                    curr_arr[:] = out_data
                 else
+                    comp = eltype(out_data) <: AbstractString ?
+                           DEFAULT_ZARR_STRING_COMPRESSOR : DEFAULT_ZARR_COMPRESSOR
                     arr = Zarr.zcreate(
-                        eltype(data), run_traj, name, size(data)...;
-                        chunks = size(data)
+                        eltype(out_data), run_traj, name, size(out_data)...;
+                        chunks = size(out_data),
+                        compressor = comp
                     )
-                    arr[:] = data
+                    arr[:] = out_data
                 end
             end
         end
@@ -340,7 +350,11 @@ function save_simulation_run!(
                     if haskey(rg, string(k))
                         rg[string(k)][:] = [Float64(v)]
                     else
-                        arr = Zarr.zcreate(Float64, rg, string(k), 1; chunks = (1,))
+                        arr = Zarr.zcreate(
+                            Float64, rg, string(k), 1;
+                            chunks = (1,),
+                            compressor = DEFAULT_ZARR_COMPRESSOR
+                        )
                         arr[:] = [Float64(v)]
                     end
                 end
@@ -354,14 +368,22 @@ function save_simulation_run!(
             if haskey(rg, "matrix")
                 rg["matrix"][:] = mat
             else
-                arr = Zarr.zcreate(Float64, rg, "matrix", size(mat)...; chunks = size(mat))
+                arr = Zarr.zcreate(
+                    Float64, rg, "matrix", size(mat)...;
+                    chunks = size(mat),
+                    compressor = DEFAULT_ZARR_COMPRESSOR
+                )
                 arr[:] = mat
             end
             strata_strs = [string(s) for s in connectivity.strata_names]
             if haskey(rg, "strata_names")
                 rg["strata_names"][:] = strata_strs
             else
-                arr = Zarr.zcreate(String, rg, "strata_names", length(strata_strs); chunks = (length(strata_strs),))
+                arr = Zarr.zcreate(
+                    String, rg, "strata_names", length(strata_strs);
+                    chunks = (length(strata_strs),),
+                    compressor = DEFAULT_ZARR_STRING_COMPRESSOR
+                )
                 arr[:] = strata_strs
             end
         end
@@ -371,11 +393,17 @@ function save_simulation_run!(
             rg = haskey(grid_group, run_id) ? grid_group[run_id] : Zarr.zgroup(grid_group, run_id)
             for (k, v) in pairs(gridded_dispersal)
                 if v isa AbstractArray
+                    out_v = (k === :lon_centers || k === :lat_centers || k === :lon_bins || k === :lat_bins) ?
+                            v : _archive_array(v)
                     if haskey(rg, string(k))
-                        rg[string(k)][:] = v
+                        rg[string(k)][:] = out_v
                     else
-                        arr = Zarr.zcreate(eltype(v), rg, string(k), size(v)...; chunks = size(v))
-                        arr[:] = v
+                        arr = Zarr.zcreate(
+                            eltype(out_v), rg, string(k), size(out_v)...;
+                            chunks = size(out_v),
+                            compressor = DEFAULT_ZARR_COMPRESSOR
+                        )
+                        arr[:] = out_v
                     end
                 end
             end
@@ -459,10 +487,10 @@ function save_simulation_run!(
         )
 
         traj_path = joinpath(base_dir, "trajectories_$(run_id).parquet")
-        GeoParquet.write(traj_path, df_trajs, (:geometry,))
+        GeoParquet.write(traj_path, df_trajs, (:geometry,); compression_codec = :zstd)
 
         if endswith(group.path, ".parquet")
-            GeoParquet.write(group.path, df_trajs, (:geometry,))
+            GeoParquet.write(group.path, df_trajs, (:geometry,); compression_codec = :zstd)
         end
 
         centroid_lon = isempty(col_lon) ? 0.0 : sum(col_lon) / length(col_lon)
@@ -494,12 +522,12 @@ function save_simulation_run!(
                 filter!(r -> r.run_id != run_id, existing_runs)
                 append!(existing_runs, run_row)
                 GC.gc()
-                GeoParquet.write(runs_path, existing_runs, (:geometry,))
+                GeoParquet.write(runs_path, existing_runs, (:geometry,); compression_codec = :zstd)
             catch
-                GeoParquet.write(runs_path, run_row, (:geometry,))
+                GeoParquet.write(runs_path, run_row, (:geometry,); compression_codec = :zstd)
             end
         else
-            GeoParquet.write(runs_path, run_row, (:geometry,))
+            GeoParquet.write(runs_path, run_row, (:geometry,); compression_codec = :zstd)
         end
 
         if !isnothing(connectivity) && hasproperty(connectivity, :matrix)
@@ -519,7 +547,7 @@ function save_simulation_run!(
             end
             conn_geom = [GeoInterface.Point(centroid_lon, centroid_lat) for _ in 1:length(c_src)]
             conn_df = DataFrame(source = c_src, target = c_dst, probability = c_prob, geometry = conn_geom)
-            GeoParquet.write(conn_path, conn_df, (:geometry,))
+            GeoParquet.write(conn_path, conn_df, (:geometry,); compression_codec = :zstd)
         end
 
         if !isnothing(gridded_dispersal)
@@ -556,7 +584,7 @@ function save_simulation_run!(
                 settlement_density = g_dens,
                 geometry = g_geom
             )
-            GeoParquet.write(grid_path, grid_df, (:geometry,))
+            GeoParquet.write(grid_path, grid_df, (:geometry,); compression_codec = :zstd)
         end
 
         return String(run_id)
@@ -587,11 +615,12 @@ function list_simulation_runs(
         end
         runs = DataFrame()
         for r_json in runs_json
+            isempty(strip(String(r_json))) && continue
             r = JSON3.read(r_json)
-            if !isnothing(run_id) && r["run_id"] != string(run_id)
+            if !isnothing(run_id) && string(get(r, :run_id, "")) != string(run_id)
                 continue
             end
-            push!(runs, r)
+            push!(runs, Dict{Symbol, Any}(Symbol(k) => v for (k, v) in pairs(r)); cols = :union)
         end
         isempty(runs) || sort!(runs, :created_at, rev = true)
         return runs
@@ -657,18 +686,18 @@ function load_trajectories_namedtuple(
     if group isa Zarr.ZGroup
         traj_group = group["trajectories"]
         tg = haskey(traj_group, run_id) ? traj_group[run_id] : traj_group
-        lons = tg["lons"][:]
-        lats = tg["lats"][:]
-        depths = tg["depths"][:]
-        temperatures = tg["temperatures"][:]
-        degree_days = haskey(tg, "degree_days") ? tg["degree_days"][:] : zeros(size(lons))
-        degree_days_ts = haskey(tg, "degree_days_timeseries") ? tg["degree_days_timeseries"][:] : degree_days
-        survival_prob = haskey(tg, "survival_probability") ? tg["survival_probability"][:] : ones(size(lons))
-        stages = tg["stages"][:]
-        alive = tg["alive"][:]
-        settle_status = tg["settlement_status"][:]
-        ids = tg["ids"][:]
-        times = tg["times"][:]
+        lons = Array(tg["lons"])
+        lats = Array(tg["lats"])
+        depths = Array(tg["depths"])
+        temperatures = Array(tg["temperatures"])
+        degree_days = haskey(tg, "degree_days") ? Array(tg["degree_days"]) : zeros(size(lons))
+        degree_days_ts = haskey(tg, "degree_days_timeseries") ? Array(tg["degree_days_timeseries"]) : degree_days
+        survival_prob = haskey(tg, "survival_probability") ? Array(tg["survival_probability"]) : ones(size(lons))
+        stages = Array(tg["stages"])
+        alive = Array(tg["alive"])
+        settle_status = Array(tg["settlement_status"])
+        ids = Array(tg["ids"])
+        times = Array(tg["times"])
 
         n_p = size(lons, 1)
         p_ids = collect(1:n_p)
@@ -676,8 +705,9 @@ function load_trajectories_namedtuple(
             p_ids = p_ids[1:min(max_particles, n_p)]
         end
 
-        al_sub = alive isa AbstractMatrix ? alive[p_ids, :] : alive[p_ids]
-        set_sub = settle_status isa AbstractMatrix ? settle_status[p_ids, :] : settle_status[p_ids]
+        st_sub = Symbol.(stages isa AbstractMatrix ? stages[p_ids, :] : stages[p_ids])
+        al_sub = Bool.(alive isa AbstractMatrix ? alive[p_ids, :] : alive[p_ids])
+        set_sub = Symbol.(settle_status isa AbstractMatrix ? settle_status[p_ids, :] : settle_status[p_ids])
 
         return (
             lons = lons[p_ids, :],
@@ -687,10 +717,10 @@ function load_trajectories_namedtuple(
             degree_days = degree_days[p_ids, :],
             degree_days_timeseries = degree_days_ts[p_ids, :],
             survival_probability = survival_prob[p_ids, :],
-            stages = stages[p_ids, :],
+            stages = st_sub,
             alive = al_sub,
             settlement_status = set_sub,
-            settlement_age = haskey(tg, "settlement_age") ? tg["settlement_age"][:][p_ids] : nothing,
+            settlement_age = haskey(tg, "settlement_age") ? Array(tg["settlement_age"])[p_ids] : nothing,
             times = times,
             ids = ids[p_ids]
         )
@@ -982,7 +1012,11 @@ function save_hydrodynamic_field!(
                 if haskey(run_group, name)
                     run_group[name][:] = val
                 else
-                    arr = Zarr.zcreate(eltype(val), run_group, name, size(val)...; chunks = size(val))
+                    arr = Zarr.zcreate(
+                        eltype(val), run_group, name, size(val)...;
+                        chunks = size(val),
+                        compressor = DEFAULT_ZARR_COMPRESSOR
+                    )
                     arr[:] = val
                 end
             end
@@ -995,7 +1029,11 @@ function save_hydrodynamic_field!(
                     if haskey(run_group, name)
                         run_group[name][:] = v
                     else
-                        arr = Zarr.zcreate(eltype(v), run_group, name, size(v)...; chunks = size(v))
+                        arr = Zarr.zcreate(
+                            eltype(v), run_group, name, size(v)...;
+                            chunks = size(v),
+                            compressor = DEFAULT_ZARR_COMPRESSOR
+                        )
                         arr[:] = v
                     end
                 end
@@ -1031,15 +1069,15 @@ function load_hydrodynamic_field(
         hg = group["hydrodynamic_fields"]
         if haskey(hg, run_id)
             rg = hg[run_id]
-            lons = haskey(rg, "lons") ? rg["lons"][:] : Float64[]
-            lats = haskey(rg, "lats") ? rg["lats"][:] : Float64[]
-            depths = haskey(rg, "depths") ? rg["depths"][:] : Float64[]
-            u_arr = haskey(rg, "u") ? rg["u"][:] : zeros(Float64, length(lons), length(lats), length(depths))
-            v_arr = haskey(rg, "v") ? rg["v"][:] : zeros(Float64, length(lons), length(lats), length(depths))
-            w_arr = haskey(rg, "w") ? rg["w"][:] : zeros(Float64, length(lons), length(lats), length(depths))
-            t_arr = haskey(rg, "temperature") ? rg["temperature"][:] : fill(4.0, length(lons), length(lats), length(depths))
-            s_arr = haskey(rg, "salinity") ? rg["salinity"][:] : fill(32.5, length(lons), length(lats), length(depths))
-            elev_arr = haskey(rg, "elevation") ? rg["elevation"][:] : zeros(Float64, length(lons), length(lats))
+            lons = haskey(rg, "lons") ? Array(rg["lons"]) : Float64[]
+            lats = haskey(rg, "lats") ? Array(rg["lats"]) : Float64[]
+            depths = haskey(rg, "depths") ? Array(rg["depths"]) : Float64[]
+            u_arr = haskey(rg, "u") ? Array(rg["u"]) : zeros(Float64, length(lons), length(lats), length(depths))
+            v_arr = haskey(rg, "v") ? Array(rg["v"]) : zeros(Float64, length(lons), length(lats), length(depths))
+            w_arr = haskey(rg, "w") ? Array(rg["w"]) : zeros(Float64, length(lons), length(lats), length(depths))
+            t_arr = haskey(rg, "temperature") ? Array(rg["temperature"]) : fill(4.0, length(lons), length(lats), length(depths))
+            s_arr = haskey(rg, "salinity") ? Array(rg["salinity"]) : fill(32.5, length(lons), length(lats), length(depths))
+            elev_arr = haskey(rg, "elevation") ? Array(rg["elevation"]) : zeros(Float64, length(lons), length(lats))
             return (
                 lons = lons, lats = lats, depths = depths,
                 u = u_arr, v = v_arr, w = w_arr,
@@ -1079,15 +1117,15 @@ function load_gridded_dispersal(
         if haskey(gg, run_id)
             rg = gg[run_id]
             return (
-                lon_centers = haskey(rg, "lon_centers") ? rg["lon_centers"][:] : Float64[],
-                lat_centers = haskey(rg, "lat_centers") ? rg["lat_centers"][:] : Float64[],
-                u_mean = haskey(rg, "u_mean") ? rg["u_mean"][:] : Matrix{Float64}(undef, 0, 0),
-                v_mean = haskey(rg, "v_mean") ? rg["v_mean"][:] : Matrix{Float64}(undef, 0, 0),
-                diffusivity = haskey(rg, "diffusivity") ? rg["diffusivity"][:] : Matrix{Float64}(undef, 0, 0),
-                settlement_density = haskey(rg, "settlement_density") ? rg["settlement_density"][:] : Matrix{Float64}(undef, 0, 0),
-                mean_exposure_temperature = haskey(rg, "mean_exposure_temperature") ? rg["mean_exposure_temperature"][:] : Matrix{Float64}(undef, 0, 0),
-                mean_degree_days = haskey(rg, "mean_degree_days") ? rg["mean_degree_days"][:] : Matrix{Float64}(undef, 0, 0),
-                sample_count = haskey(rg, "sample_count") ? rg["sample_count"][:] : Matrix{Int}(undef, 0, 0)
+                lon_centers = haskey(rg, "lon_centers") ? Array(rg["lon_centers"]) : Float64[],
+                lat_centers = haskey(rg, "lat_centers") ? Array(rg["lat_centers"]) : Float64[],
+                u_mean = haskey(rg, "u_mean") ? Array(rg["u_mean"]) : Matrix{Float64}(undef, 0, 0),
+                v_mean = haskey(rg, "v_mean") ? Array(rg["v_mean"]) : Matrix{Float64}(undef, 0, 0),
+                diffusivity = haskey(rg, "diffusivity") ? Array(rg["diffusivity"]) : Matrix{Float64}(undef, 0, 0),
+                settlement_density = haskey(rg, "settlement_density") ? Array(rg["settlement_density"]) : Matrix{Float64}(undef, 0, 0),
+                mean_exposure_temperature = haskey(rg, "mean_exposure_temperature") ? Array(rg["mean_exposure_temperature"]) : Matrix{Float64}(undef, 0, 0),
+                mean_degree_days = haskey(rg, "mean_degree_days") ? Array(rg["mean_degree_days"]) : Matrix{Float64}(undef, 0, 0),
+                sample_count = haskey(rg, "sample_count") ? Array(rg["sample_count"]) : Matrix{Int}(undef, 0, 0)
             )
         end
     elseif group isa GeoParquetStorage
@@ -1157,10 +1195,10 @@ function load_connectivity_matrix(
         if haskey(cg, run_id)
             rg = cg[run_id]
             return (
-                matrix = rg["matrix"][:],
-                strata_names = [string(s) for s in rg["strata_names"][:]],
-                counts_unweighted = haskey(rg, "counts_unweighted") ? rg["counts_unweighted"][:] : nothing,
-                counts_matrix = haskey(rg, "counts_matrix") ? rg["counts_matrix"][:] : nothing
+                matrix = Array(rg["matrix"]),
+                strata_names = [string(s) for s in Array(rg["strata_names"])],
+                counts_unweighted = haskey(rg, "counts_unweighted") ? Array(rg["counts_unweighted"]) : nothing,
+                counts_matrix = haskey(rg, "counts_matrix") ? Array(rg["counts_matrix"]) : nothing
             )
         end
     elseif group isa GeoParquetStorage
@@ -1351,7 +1389,7 @@ function compute_ensemble_model_average(
 end
 
 """
-    geopublish_lakehouse!(catalog::Tethys.CatalogModule.GeoDataCatalog,
+    publish_lakehouse_dataset!(catalog::Tethys.CatalogModule.TethysDataCatalog,
                           storage_path::AbstractString;
                           key::Symbol,
                           name::String,
@@ -1360,14 +1398,14 @@ end
 Publish particle tracking simulation outputs (e.g. dispersal kernels, connectivity)
 directly into the Tethys Lakehouse repository under the `:derived` (Gold) tier.
 """
-function geopublish_lakehouse!(catalog::Tethys.CatalogModule.GeoDataCatalog,
+function publish_lakehouse_dataset!(catalog::Tethys.CatalogModule.TethysDataCatalog,
                                storage_path::AbstractString;
                                key::Symbol,
                                name::String,
                                derived_from::Vector{Symbol} = Symbol[])
-    return Tethys.geopublish_dataset!(
+    return Tethys.publish_dataset!(
         catalog,
-        storage_path;
+        String(storage_path);
         key = key,
         name = name,
         tier = :derived,

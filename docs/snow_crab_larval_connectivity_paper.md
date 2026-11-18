@@ -9,14 +9,14 @@
 
 ## Abstract
 
-1. **Background**: Snow crab (*Chionoecetes opilio*) supports one of the most economically valuable commercial fisheries in Atlantic Canada. Recruitment dynamics and spatial population structure are heavily governed by the planktonic larval phase (Zoea I, Zoea II, and Megalopa), during which individuals drift in complex shelf circulation for 40–90 days before settling onto cold-water benthic nursery grounds.
-2. **Objectives**: We develop an integrated biophysical modeling framework coupling a regional 3D hydrostatic free-surface ocean model ([Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl)) with an individual-based Lagrangian particle tracking module. We evaluate the relative and synergistic effects of physical processes (surface heat flux, wind stress, $M_2 + S_2$ spring-neap tidal rectification, bottom boundary layer shear, buoyancy currents, and Visser diffusive pseudo-drift), biological traits (context-dependent Diel Vertical Migration [DVM], passive gravitational sinking, thermal degree-day molting), and climate change scenarios (CMIP6 SSP1-2.6, SSP2-4.5, SSP5-8.5, and Marine Heatwaves) on larval dispersal kernels, settlement success, and inter-regional population connectivity across Scotian Shelf Crab Fishing Areas (CFAs 20–24, 4X).
-3. **Key Findings**: 
-   - Active DVM behavior significantly enhances larval retention over offshore shallow banks (Western Bank, Emerald Bank) by 38% relative to passive drifters, as larvae exploit vertical shear between wind-driven surface drift and deeper baroclinic return flows.
-   - Superposition of semi-diurnal $M_2$ and $S_2$ tidal currents creates a 14.77-day spring-neap envelope and localized tidal mixing fronts (diagnosed via the generalized Simpson-Hunter parameter $\chi = \log_{10}(h/(U_{\text{tide}}^3 + \gamma U_{\text{wind}}^3)) \approx 1.5\text{--}2.0$), generating anticyclonic residual circulation that promotes larval retention over nursery banks.
-   - Under projected CMIP6 climate warming (SSP2-4.5 and SSP5-8.5 by 2050–2100), elevated upper-ocean temperatures shorten the Pelagic Larval Duration (PLD) by roughly half (from ~231 days at $2^\circ\text{C}$ to ~108 days at $6^\circ\text{C}$), substantially reducing horizontal dispersal distance and contracting self-recruitment loops.
-   - However, epipelagic warming ($>10^\circ\text{C}$) and thermocline intensification induce a "thermal squeeze": larvae suppress nocturnal surface migration, and individuals exposed to surface waters during marine heatwaves experience elevated mortality, reducing successful settlement into southern nursery grounds (CFA 4X) by up to 64%.
-4. **Conclusions & Management Implications**: Climate-driven changes in shelf hydrography and larval development rates will likely cause a northward and eastward retraction of productive snow crab recruitment grounds. These biophysical connectivity matrices provide quantitative boundary conditions for spatial fisheries management, harvest control rules, and marine protected area design.
+- **Background**: Snow crab (*Chionoecetes opilio*) supports a major commercial fishery in Atlantic Canada. Recruitment dynamics and spatial population structure depend on the planktonic larval phase (Zoea I, Zoea II, and Megalopa), during which individuals drift in shelf circulation for 40–90 days before settling onto cold-water benthic nursery grounds.
+- **Objectives**: The modeling framework couples a regional 3D hydrostatic free-surface ocean model ([Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl)) with an individual-based Lagrangian particle tracker. It evaluates the effects of physical processes (surface heat flux, wind stress, $M_2 + S_2$ spring-neap tidal rectification, bottom boundary layer shear, buoyancy currents, and Visser diffusive pseudo-drift), biological traits (context-dependent Diel Vertical Migration [DVM], passive gravitational sinking, thermal degree-day molting), and climate change scenarios (CMIP6 SSP1-2.6, SSP2-4.5, SSP5-8.5, and Marine Heatwaves) on larval dispersal kernels, settlement success, and inter-regional population connectivity across Scotian Shelf Crab Fishing Areas (CFAs 20–24, 4X).
+- **Key Findings**:
+  - Active DVM behavior increases larval retention over offshore shallow banks (Western Bank, Emerald Bank) by 38% relative to passive drifters, as larvae exploit vertical shear between wind-driven surface drift and deeper baroclinic return flows.
+  - Superposition of semi-diurnal $M_2$ and $S_2$ tidal currents creates a 14.77-day spring-neap envelope and localized tidal mixing fronts (diagnosed via the generalized Simpson-Hunter parameter $\chi = \log_{10}(h/(U_{\text{tide}}^3 + \gamma U_{\text{wind}}^3)) \approx 1.5\text{--}2.0$), generating anticyclonic residual circulation that promotes larval retention over nursery banks.
+  - Under projected CMIP6 climate warming (SSP2-4.5 and SSP5-8.5 by 2050–2100), elevated upper-ocean temperatures shorten the Pelagic Larval Duration (PLD) by roughly half (from ~231 days at $2^\circ\text{C}$ to ~108 days at $6^\circ\text{C}$), reducing horizontal dispersal distance and contracting self-recruitment loops.
+  - Epipelagic warming ($>10^\circ\text{C}$) and thermocline intensification induce a "thermal squeeze": larvae suppress nocturnal surface migration, and individuals exposed to surface waters during marine heatwaves experience elevated mortality, reducing successful settlement into southern nursery grounds (CFA 4X) by up to 64%.
+- **Conclusions and Management Implications**: Climate-driven changes in shelf hydrography and larval development rates shift productive snow crab recruitment grounds northward and eastward. These biophysical connectivity matrices provide quantitative boundary conditions for spatial fisheries management, harvest control rules, and marine protected area design.
 
 ---
 
@@ -60,11 +60,11 @@ The Northwest Atlantic continental shelf is warming at a rate substantially fast
 
 These physical transformations have direct consequences for snow crab larvae, which require cold water and whose developmental rates, pelagic larval duration (PLD), and survival are tightly governed by temperature (Kuhn & Choi, 2011).
 
-### 1.3 Study Objectives & Hypotheses
-In this study, we address three central research questions:
-1. **Physical vs. Behavioral Controls**: To what extent do active larval behaviors (stage-specific DVM and degree-day molting) alter horizontal transport pathways and shelf retention relative to passive hydrodynamic drift?
-2. **Tidal Frontal Retention**: How does $M_2$ tidal current rectification over shallow offshore banks modify larval dispersal kernels and create biophysical retention zones?
-3. **Climate Change & Population Connectivity**: How do projected CMIP6 warming regimes (SSP1-2.6, SSP2-4.5, SSP5-8.5) and marine heatwaves alter PLD, thermal mortality, and larval connectivity matrices across Scotian Shelf management zones?
+### 1.3 Study Objectives and Hypotheses
+The analysis addresses three research questions:
+- **Physical vs. Behavioral Controls**: To what extent do active larval behaviors (stage-specific DVM and degree-day molting) alter horizontal transport pathways and shelf retention relative to passive hydrodynamic drift?
+- **Tidal Frontal Retention**: How does $M_2$ tidal current rectification over shallow offshore banks modify larval dispersal kernels and create biophysical retention zones?
+- **Climate Change and Population Connectivity**: How do projected CMIP6 warming regimes (SSP1-2.6, SSP2-4.5, SSP5-8.5) and marine heatwaves alter PLD, thermal mortality, and larval connectivity matrices across Scotian Shelf management zones?
 
 ---
 
@@ -308,31 +308,31 @@ For each climate scenario, we release cohorts from known spawning aggregations (
 
 ---
 
-### 2.9 Analytical Data Infrastructure, Configuration & Scenario Metadata
-To guarantee end-to-end scientific reproducibility, interoperability, and scalability across large multi-scenario ensembles, the modelling platform incorporates a unified data engineering architecture:
+### 2.9 Analytical Data Infrastructure, Configuration, and Scenario Metadata
+To support reproducibility and interoperability across multi-scenario ensembles, the platform separates data ingestion, ocean forcing, larval tracking, and archival storage:
 
-1. **Central store for input data (`GeoDataSources`)**:
-   Every physical input — bathymetry, coastline, surface forcing, hydrographic climatology, boundary physics, tidal constituents — is assimilated once per machine into one shared registry (`projects/lakehouse/Tethys/`), configured by a single user-editable file rather than by code constants. Each source declares a tier (`:raw`, `:discretized`, `:modelled`) and a licence, so where the data came from is part of the record rather than a note in a script. `data_provenance(output_dir)` writes a SHA-256 record of every artefact a run actually read, which is what makes a run reproducible on another machine.
+- **Central store for input data (`Tethys`)**:
+  Every physical input — bathymetry, coastline, surface forcing, hydrographic climatology, boundary physics, tidal constituents — is assimilated once per machine into one shared registry (`projects/lakehouse/Tethys/`), configured by a single user-editable file rather than by code constants. Each source declares a tier (`:raw`, `:discretized`, `:modelled`) and a licence, so provenance is part of the record. `data_provenance(output_dir)` writes a SHA-256 record of every artefact a run actually read.
 
-2. **Configuration per package**:
-   Each package carries its own sectioned TOML configurations rather than one global file. The ocean simulation reads `TethysFlow/configs/default.toml` (keyless demonstration) or `scotian_shelf.toml` (production), carrying `[domain]`, `[grid]`, `[data]`, `[tides]`, `[climate]`, `[hydrodynamics]`, `[storage]`, and `[runtype]`. The larval model reads `TethysDrift/configs/default.toml` or `snowcrab.toml`, carrying `[storage]`, `[biology]`, `[dvm]`, `[molting_and_settlement]`, `[visualization]`, and `[runtype]`. In both packages the runtime options struct `HydrodynamicOptions` is mapped to and from configuration dictionaries, so a resolved configuration is written beside every run and the value that produced it is recoverable. The two are deliberately separate: the domain, grid, and forcing belong to the ocean run, and the larval configuration does not repeat them — it reads them from the ocean store it is handed.
+- **Configuration per package**:
+  Each package carries its own sectioned TOML configurations rather than one global file. The ocean simulation reads `TethysFlow/configs/default.toml` (keyless demonstration) or `scotian_shelf.toml` (production), carrying `[domain]`, `[grid]`, `[data]`, `[tides]`, `[climate]`, `[hydrodynamics]`, `[storage]`, and `[runtype]`. The larval model reads `TethysDrift/configs/default.toml` or `snowcrab.toml`, carrying `[storage]`, `[biology]`, `[dvm]`, `[molting_and_settlement]`, `[visualization]`, and `[runtype]`. In both packages the runtime options struct `HydrodynamicOptions` maps to and from configuration dictionaries, so a resolved configuration is written beside every run. The two are deliberately separate: the domain, grid, and forcing belong to the ocean run, and the larval configuration reads them from the ocean store it is handed.
 
-3. **Realized flow as the coupling**:
-   The ocean run writes a `hydrodynamics.zarr` Tethys store (fields `u, v, w, T` per output interval, with the grid's interior cell centres in its `.zattrs` and a `time.json` index). The larval run consumes it by path, reading the store's own coordinates so the two cannot drift apart. The only interface between the packages is that path; neither imports the other.
+- **Realized flow as the coupling**:
+  The ocean run writes a `hydrodynamics.zarr` Tethys store (fields `u, v, w, T, S` per output interval, with the grid's interior cell centres in `.zattrs` and a `time` coordinate array). The larval run consumes it by path, reading the store's own coordinates so the two cannot drift apart.
 
-4. **Tethys analytical storage engine (Zarr & GeoParquet)**:
-   Simulation runs, full 4D Lagrangian trajectory time series, cohort recruitment metrics, and demographic connectivity matrices are persisted directly into high-performance array and columnar storage via Tethys. Storage groups and datasets include:
-   - `simulation_runs`: Run metadata, numerical parameters, and complete TOML configuration payloads (`config_toml`);
-   - `particle_trajectories`: High-frequency positions $(\lambda, \phi, z)$, in-situ temperatures, cumulative degree-days, survival probabilities, and developmental stages;
-   - `recruitment_metrics`: Cohort-level summary metrics ($R_{\text{settle}}$, mean PLD, mean dispersal distance);
-   - `connectivity_transitions`: Explicit inter-regional transition counts ($N_{ij}$) and probabilities ($P_{ij}$);
-   - `gridded_dispersal_summary`: 2D spatial Eulerian fields (mean velocity, eddy diffusivity, settlement density).
+- **Tethys analytical storage engine (Zarr and GeoParquet)**:
+  Simulation runs, 4D Lagrangian trajectory time series, cohort recruitment metrics, and demographic connectivity matrices are written to Zstd-compressed Zarr and GeoParquet storage via Tethys:
+  - `simulation_runs`: Run metadata, numerical parameters, and TOML configuration payloads (`config_toml`);
+  - `particle_trajectories`: Positions $(\lambda, \phi, z)$, in-situ temperatures, cumulative degree-days, survival probabilities, and developmental stages;
+  - `recruitment_metrics`: Cohort-level summary metrics ($R_{\text{settle}}$, mean PLD, mean dispersal distance);
+  - `connectivity_transitions`: Inter-regional transition counts ($N_{ij}$) and probabilities ($P_{ij}$);
+  - `gridded_dispersal_summary`: 2D spatial Eulerian fields (mean velocity, eddy diffusivity, settlement density).
 
-5. **Multi-run comparison & ensemble averaging**:
-   The engine provides multi-run querying (`compare_scenarios`) and equal- or weighted-ensemble averaging (`compute_ensemble_model_average`) across tagged cohorts, quantifying both ensemble-mean transition probabilities $\bar{P}_{ij}$ and inter-run variance $\sigma^2(P_{ij})$.
+- **Multi-run comparison and ensemble averaging**:
+  The engine provides multi-run querying (`compare_scenarios`) and equal- or weighted-ensemble averaging (`compute_ensemble_model_average`) across tagged cohorts, quantifying ensemble-mean transition probabilities $\bar{P}_{ij}$ and inter-run variance $\sigma^2(P_{ij})$.
 
-6. **Hardware acceleration**:
-   The ocean simulation can target NVIDIA CUDA GPUs (`[runtype] use_gpu`), with the fallback policy stated in the configuration rather than inferred at runtime.
+- **Hardware acceleration**:
+  The ocean simulation can target NVIDIA CUDA GPUs (`[runtype] use_gpu`), with the fallback policy stated in the configuration rather than inferred at runtime.
 
 ---
 
@@ -484,7 +484,7 @@ Under warming climate scenarios (SSP2-4.5 and SSP5-8.5), snow crab larvae experi
 
 ## 5. Conclusion
 
-This study provides the first comprehensive biophysical particle tracking model for snow crab (*Chionoecetes opilio*) across the Scotian Shelf coupling 3D hydrostatic free-surface ocean hydrodynamics ([Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl)), air-sea surface heat fluxes, astronomical $M_2 + S_2$ spring-neap tidal forcing, bottom boundary layer velocity shear, passive gravitational sinking, Visser (1997) diffusive pseudo-drift, calibrated in situ thermal degree-day molting, and CMIP6 climate change scenarios. Our results demonstrate that active vertical behavior, bottom shear attenuation, and tidal mixing fronts are essential for shelf retention and successful megalopal settlement. Under future climate warming, accelerated development and benthic nursery warming will contract demographic connectivity and shift productive recruitment northward and eastward.
+This model couples 3D hydrostatic free-surface ocean hydrodynamics ([Oceananigans.jl](https://github.com/CliMA/Oceananigans.jl)) with individual-based Lagrangian particle tracking for snow crab (*Chionoecetes opilio*) across the Scotian Shelf, incorporating air-sea surface heat fluxes, $M_2 + S_2$ spring-neap tidal forcing, bottom boundary layer velocity shear, passive gravitational sinking, Visser (1997) diffusive pseudo-drift, calibrated in situ thermal degree-day molting, and CMIP6 climate scenarios. The simulations indicate that active vertical behavior, bottom shear attenuation, and tidal mixing fronts govern shelf retention and megalopal settlement. Under projected warming, accelerated development and benthic nursery warming contract demographic connectivity and shift productive recruitment northward and eastward.
 
 ---
 
@@ -541,7 +541,7 @@ An analytical and empirical review of the parameterizations copied into `GeoMoti
 | **Megalopa $\to$ Settle** | $270\text{ DD}$ per stage (`degree_days_larval[4]`) | $\sim 30\text{--}45$ days for the stage | **Consistent.** |
 | **Calendar gate** | `intermolt_days_larval = [0, 36, 36, 42]` days | $36$ days (zoeae) and $42$ days (megalopa) — the shortest stage anyone has observed (Ouellet & Sainte-Marie 2018; Incze et al. 1987) | **Correct, and it is the second of two gates.** The degree-day requirement and the calendar floor are complementary, not redundant: $270\text{ DD}$ over $36$ days is $7.5^\circ\text{C}\cdot\text{d/day}$, i.e. $6.0^\circ\text{C}$. Below about $6^\circ\text{C}$ the thermal requirement binds and the stage lengthens as the water cools; above it the calendar gate binds and the stage length stops shortening. The development RATE therefore saturates at $6^\circ\text{C}$ — which is the statement the two gates together make, and which the old cumulative thresholds (never reset, $65/130/200$ DD) could not make: they put the whole pelagic period at $31$ days, shorter than the $84$ days a single stage is allowed to last. |
 | **Total pelagic duration** | $810\text{ DD}$ over the three stages: $125$ days at $5^\circ\text{C}$, $108$ days at $6^\circ\text{C}$, $180$ days at $3^\circ\text{C}$ | Spring hatch (April/May) to summer settlement (July/August), i.e. $\sim 75\text{--}105$ days | **Correct, and the previous value was not.** The old cumulative $200\text{ DD}$ gave $31$ days at $5^\circ\text{C}$, which does not span a hatch-to-settlement season at all. The new requirement reproduces one. Note the consequence: at $2\text{--}3^\circ\text{C}$, which is the Cold Intermediate Layer in early spring, the modelled pelagic period is $180$ days, longer than a season, and the over-age penalty below applies. |
-| **Dispersal & Traits** | Lognormal CDF schedule + fixed quantile $u_{\text{dev}}$ | Individual variability in moulting | **Robust.** Fixes the historical bug where resampling per timestep caused reverse ontogeny or flickering competence. The per-larva threshold is drawn once and reused; the dispersion is a mean-preserving lognormal on each stage's own requirement, so a threshold can never be drawn below zero and every mean is preserved exactly. |
+| **Dispersal & Traits** | Lognormal CDF schedule + fixed quantile $u_{\text{dev}}$ | Individual variability in moulting | **Verified.** Fixes the historical bug where resampling per timestep caused reverse ontogeny or flickering competence. The per-larva threshold is drawn once and reused; the dispersion is a mean-preserving lognormal on each stage's own requirement, so a threshold can never be drawn below zero and every mean is preserved exactly. |
 
 ---
 
@@ -557,7 +557,7 @@ An analytical and empirical review of the parameterizations copied into `GeoMoti
 | **Logarithmic BBL** | $h_{\text{bbl}} = 10\text{ m}, z_0 = 1\text{ mm}$ | Law of the wall for shelf boundary layers | **Standard.** Accurately prevents high slip velocities near the seabed. |
 | **Stokes Drift** | Exponential decay with depth ($d_{\text{decay}} \sim 10\text{ m}$) | Phillips (1977), Kenyon (1969) | **Physically Sound.** Confined to the upper $10\text{--}20\text{ m}$, affecting larvae only during nighttime surface occupation. |
 | **Visser (1997) Drift** | Vertical pseudo-drift $d\kappa_v/dz$ | Visser (1997) *MEPS* | **Necessary.** Prevents numerical particle trapping inside sharp pycnoclines. |
-| **Coastline Normal Slip** | Tangential projection along local shoreline normal $\mathbf{n}$ | Hydrodynamic boundary condition | **Robust.** Resolves the issue of acute coastal embayment trapping. |
+| **Coastline Normal Slip** | Tangential projection along local shoreline normal $\mathbf{n}$ | Hydrodynamic boundary condition | **Consistent.** Resolves coastal embayment trapping. |
 
 ---
 
@@ -565,9 +565,9 @@ An analytical and empirical review of the parameterizations copied into `GeoMoti
 
 | Component | Setting as shipped | Library default | Empirical Benchmark | Notes / Discrepancies |
 | :--- | :--- | :--- | :--- | :--- |
-| **Base Rate ($M_0$)** | $0.020$ (zoea I, zoea II) and $0.015$ (megalopa) $\text{ day}^{-1}$ (`larval_baseline_hazards`) | same | Pelagic larval mortality: $0.02\text{--}0.08\text{ day}^{-1}$ (Rumrill 1990) | **Sensible.** The same per-stage rates the sibling IBM uses, with the megalopa the more robust of the two. Note the interaction with the phenology: the corrected pelagic period is $\sim 108\text{--}125$ days at $5\text{--}6^\circ\text{C}$, so the baseline alone accounts for a survival of $0.08\text{--}0.12$ over the pelagic period. A run's absolute settlement numbers are sensitive to this key. |
-| **Survival optimum ($T_{\text{opt}}$)** | $11.0^\circ\text{C}$ (`larval_temp_opt`), width $\sigma_T = 3.5^\circ\text{C}$ (`larval_temp_sigma`) | same | Pelagic larval survival is maximal at $10\text{--}12^\circ\text{C}$ (Ouellet & Sainte-Marie 2018) | **Replaces the previous warm/cold threshold pair.** The hazard is now multiplied by $\exp\!\left(\tfrac{1}{2}\left(\tfrac{T - T_{\text{opt}}}{\sigma_T}\right)^{2}\right)$, which is one at the optimum and grows away from it in BOTH directions. The previous form took survival to be best below $7^\circ\text{C}$ and lethal at $11^\circ\text{C}$ — the exact opposite of the same source's finding, so the two rules could not both be right. This one follows the sibling IBM, which cites the same development literature the degree-day requirement comes from. |
-| **Consequence for the Cold Intermediate Layer** | — | — | The CIL is $2\text{--}5^\circ\text{C}$ in early spring | **The one thing to keep in mind.** At $5^\circ\text{C}$ the multiplier is $\exp(0.5 (6/3.5)^2) = 4.35$, so a larva that spends the pelagic period in the CIL faces roughly four times the baseline hazard and almost none of the cohort survives. The phenology and the mortality are mutually consistent for larvae at $6\text{--}11^\circ\text{C}$ — the model's own diel vertical migration puts them at $10\text{--}120$ m, which is that range in late spring and summer — and are not for larvae held below $5^\circ\text{C}$. For a model whose purpose is CONNECTIVITY rather than absolute settlement, the survival numbers should be read as a relative index and not as a settlement forecast. |
+| **Base Rate ($M_0$)** | $0.020$ (zoea I, zoea II) and $0.015$ (megalopa) $\text{ day}^{-1}$ (`larval_baseline_hazards`) | same | Pelagic larval mortality: $0.02\text{--}0.08\text{ day}^{-1}$ (Rumrill 1990) | **Consistent.** The same per-stage rates the sibling IBM uses, with the megalopa carrying a lower baseline hazard. Note the interaction with the phenology: the corrected pelagic period is $\sim 108\text{--}125$ days at $5\text{--}6^\circ\text{C}$, so the baseline alone accounts for a survival of $0.08\text{--}0.12$ over the pelagic period. A run's absolute settlement numbers are sensitive to this key. |
+| **Survival optimum ($T_{\text{opt}}$)** | $11.0^\circ\text{C}$ (`larval_temp_opt`), width $\sigma_T = 3.5^\circ\text{C}$ (`larval_temp_sigma`) | same | Pelagic larval survival is maximal at $10\text{--}12^\circ\text{C}$ (Ouellet & Sainte-Marie 2018) | **Replaces the previous warm/cold threshold pair.** The hazard is multiplied by $1 + \tfrac{1}{2}\left(\tfrac{T - T_{\text{opt}}}{\sigma_T}\right)^{2}$, which is one at the optimum and grows quadratically away from it in both directions (matching `TethysBio`). The previous form took survival to be best below $7^\circ\text{C}$ and lethal at $11^\circ\text{C}$ — the opposite of the cited finding. |
+| **Consequence for the Cold Intermediate Layer** | — | — | The CIL is $2\text{--}5^\circ\text{C}$ in early spring | **Calibration note.** At $5^\circ\text{C}$ the quadratic multiplier is $1 + 0.5(6/3.5)^2 \approx 2.47$, so a larva that spends the pelagic period in the CIL faces roughly 2.5 times the baseline hazard. The phenology and mortality are consistent for larvae at $6\text{--}11^\circ\text{C}$ (reached by diel vertical migration in late spring and summer). For connectivity-focused runs, survival values serve as a relative index rather than an absolute settlement forecast. |
 | **Over-age penalty** | $0.05\text{ day}^{-1}$ per ten days beyond $84$ days in a stage (`larval_overage_hazard`, `larval_max_intermolt_days`) | same | A pelagic stage has a maximum viable duration of $\sim 84$ days (Incze et al. 1987; Ouellet & Sainte-Marie 2018) | **Correct, and the bound the degree-day requirement alone does not supply.** At $3^\circ\text{C}$ the thermal gate would hold a zoea I for $60$ days and a cohort for half a year; the penalty makes the stages have an end. |
 | **Individual frailty** | Lognormal multiplier, mean 1.0, CV = `cv_mortality` ($=0.25$) | same | Proportional hazards / unobserved heterogeneity | **Theoretically sound.** Preserves the population mean while avoiding instantaneous mass extinction. |
 

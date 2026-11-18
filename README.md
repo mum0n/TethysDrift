@@ -48,7 +48,7 @@ Two, in `configs/` (the biology schema sections — `biology`, `dvm`,
 
 - **`[storage]`** is where the run reads and writes: `output_dir` (this package's results
   directory) and `ocean_model` (the realized ocean store to track through — the
-  `--hydro-file` default). Both default into `lakehouse_dir("Geo{Larval,Ocean}Model", …)`;
+  `--hydro-file` default). Both default into `lakehouse_dir("Tethys{Drift,Flow}", …)`;
   a command-line `--hydro-file` overrides. `ocean_model` names the Tethys store itself —
   the `hydrodynamics.zarr` directory the ocean half wrote — not the run directory holding
   it.
@@ -61,10 +61,10 @@ Two, in `configs/` (the biology schema sections — `biology`, `dvm`,
 
 `TethysDrift` resolves all lakehouse directories via `Tethys.lakehouse_dir(...)`.
 Precedence hierarchy:
-* `ENV["GEODATA_LAKEHOUSE"]` (global override).
-* `LocalPreferences.toml` (`[Tethys] lakehouse_dir`).
-* `~/.geodata/storage.toml` (`[storage] store_root`).
-* Proximity fallback (`projects/lakehouse/`).
+- `ENV["TETHYS_LAKEHOUSE"]` or `ENV["GEODATA_LAKEHOUSE"]` (global override).
+- `LocalPreferences.toml` (`[Tethys] lakehouse_dir`).
+- `~/.tethys/storage.toml` or `~/.geodata/storage.toml` (`[storage] store_root`).
+- Proximity fallback (`projects/lakehouse/`).
 
 To configure the lakehouse persistently:
 ```julia

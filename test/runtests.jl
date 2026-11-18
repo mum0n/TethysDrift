@@ -33,6 +33,14 @@ const AVAILABLE_SEGMENTS = Dict{Symbol, @NamedTuple{file::String, desc::String}}
     :driver => (
         file = "test_driver.jl",
         desc = "Pipeline Driver Segments & Surface API Export"
+    ),
+    :config => (
+        file = "test_config.jl",
+        desc = "Configuration, Domain Constants & Round-Trip Conversion"
+    ),
+    :analysis => (
+        file = "test_analysis.jl",
+        desc = "Analysis, Single-Layer Store, Checkpoint & Visualization"
     )
 )
 

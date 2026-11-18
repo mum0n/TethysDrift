@@ -127,7 +127,7 @@ end
 """
     get_default_configuration() -> Dict{String, Any}
 
-Generate a comprehensive dictionary of all default parameters across all modeling domains.
+Return the default parameter dictionary across all configuration sections.
 """
 function get_default_configuration()::Dict{String, Any}
     return Dict{String, Any}(

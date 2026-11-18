@@ -10,6 +10,10 @@ separating them would split a template from the code that fills it.
 
 using CairoMakie
 import CairoMakie: record
+using Zarr
+
+# Format a real scalar for RFC 8259 JSON, mapping non-finite values to `null`.
+_json_num(x::Real; digits::Int = 4) = isfinite(x) ? string(round(x; digits = digits)) : "null"
 
 """
     export_interactive_tracks_html(
@@ -22,36 +26,44 @@ import CairoMakie: record
         recruitment_metrics::Union{Nothing, NamedTuple} = nothing,
         bathymetry::Union{Nothing, NamedTuple} = nothing,
         strata_definitions::Union{Nothing, AbstractVector} = nothing,
-        title::AbstractString = "Interactive Larval Dispersal & Demographic Connectivity Map"
+        title::AbstractString = "Interactive Larval Dispersal & Demographic Connectivity Map",
+        max_tracks::Int = 0,
+        max_points_per_track::Int = 0
     ) -> String
 
-Generate a standalone, interactive HTML5 + Leaflet.js oceanographic dashboard
-visualizing 4D Lagrangian particle tracks, developmental stages, DVM behaviors,
-hydrodynamic Eulerian flow fields (advection currents, temperature, salinity,
-free surface elevation, upwelling, bathymetry), and regional Crab Fishing Area (CFA) connectivity.
+Generate an interactive HTML5 + Leaflet.js dashboard paired with a
+zlib-compressed binary sidecar (`<stem>.data.zz`) containing the 4D Lagrangian
+particle tracks, developmental stages, DVM behaviors, settlement density, and
+regional Crab Fishing Area (CFA) connectivity. Eulerian hydrodynamic grids are
+intentionally omitted from the dashboard payload (handled by TethysFlow).
+
+When served over HTTP/HTTPS (including GitHub Pages or a local static server),
+the HTML fetches `<stem>.data.zz` automatically and decompresses it in the
+browser via `DecompressionStream("deflate")`. When opened directly over
+`file://` where browser CORS blocks `fetch()`, a file-picker overlay allows
+selecting `<stem>.data.zz` locally.
 
 # Mathematical & Behavioral Visualization
 - **4D Trajectories**: \$\\mathbf{x}_p(t) = (\\\\\\\\lambda_p(t), \\phi_p(t), z_p(t))\$ with
   temperature exposure \$T_p(t)\$ and cumulative degree-days \$DD_p(t)\$.
-- **Hydrodynamic Eulerian Advection**: Horizontal current velocity vector field
-  \$\\\\\\\\\\\\\\boldsymbol{u}_h = (u, v)\$, speed \$|\\\\\\\\\\\\\\boldsymbol{u}_h|\$, and flow direction.
-- **Hydrodynamic Tracers**: Continuous thermal \$T(x,y,z)\$ and haline \$S(x,y,z)\$
-  stratification fields rendered on responsive hardware-accelerated canvas overlays.
-- **Upwelling & Sea Surface Height**: Vertical velocity \$w\$ and free surface elevation \$\\eta\$.
 - **Developmental Molting Coloration**: Zoea I \$\\to\$ IV, Megalopa, Instar I (settled).
 - **Playback Animation**: Interactive time-stepping simulation scrubber and velocity trails.
 
 # Inputs
 - `output_path::AbstractString`: Destination path (e.g. `"outputs/interactive_larval_tracks.html"`).
+  A companion sidecar `<stem>.data.zz` is written alongside it.
 - `trajectories::NamedTuple`: Particle tracking trajectory NamedTuple.
 - `runs_data`: Optional dictionary mapping run names to data bundles.
-- `hydrodynamics`: Optional hydrodynamic model output (Oceananigans model, NamedTuple, or Dict).
+- `hydrodynamics`: Retained as a no-op keyword for signature compatibility; ignored.
 - `gridded_dispersal`: Optional 2D spatial dispersal fields.
 - `connectivity`: Optional connectivity transition matrix.
 - `recruitment_metrics`: Optional summary recruitment metrics.
-- `bathymetry`: Optional bathymetry dataset.
+- `bathymetry`: Retained as a no-op keyword for signature compatibility; ignored.
 - `strata_definitions`: Optional spatial management boundaries.
 - `title::AbstractString`: Dashboard header title.
+- `max_tracks::Int`: Optional upper bound on exported tracks (`<= 0` exports all tracks).
+- `max_points_per_track::Int`: Optional upper bound on time points per track
+  (`<= 0` exports all time points).
 
 # Outputs
 - `String`: Path to the generated interactive HTML file.
@@ -67,8 +79,8 @@ function export_interactive_tracks_html(
     bathymetry::Union{Nothing, NamedTuple} = nothing,
     strata_definitions::Union{Nothing, AbstractVector} = nothing,
     title::AbstractString = "Interactive Larval Dispersal & Demographic Connectivity Map",
-    max_tracks::Int = 400,
-    max_points_per_track::Int = 900
+    max_tracks::Int = 0,
+    max_points_per_track::Int = 0
 )::String
     out_dir = dirname(output_path)
     if !isempty(out_dir) && !isdir(out_dir)
@@ -190,52 +202,44 @@ function export_interactive_tracks_html(
         ages = trajs.settlement_age
         ids = trajs.ids
 
-        # ── Payload decimation ────────────────────────────────────────────────
-        # The HTML embeds every array as inline JSON, so a full-resolution run is
-        # unusable in a browser: 500 larvae over a 730-day horizon at dt = 300 s is
-        # ~210 000 steps x 7 arrays, which produced a 1.7 GB file that would not open at all.
-        # Thin in time and cap the number of tracks so the page stays interactive.
-        # Traces are decimated uniformly (endpoints always retained), and the number of
-        # tracks shown is capped, but every *statistic* below is still computed from the
-        # FULL-resolution arrays, so the summary numbers are unaffected.
-        track_idx = if n_p > max_tracks
+        # Optional uniform decimation when max_tracks > 0 or max_points_per_track > 0.
+        # Defaults (<= 0) retain all tracks and time steps in the compressed sidecar;
+        # summary statistics are always computed from full-resolution arrays.
+        track_idx = if max_tracks > 0 && n_p > max_tracks
             unique(round.(Int, range(1, n_p, length = max_tracks)))
         else
             collect(1:n_p)
         end
-        time_idx = if n_t > max_points_per_track
+        time_idx = if max_points_per_track > 0 && n_t > max_points_per_track
             unique(round.(Int, range(1, n_t, length = max_points_per_track)))
         else
             collect(1:n_t)
         end
         n_tracks_shown = length(track_idx)
         n_points_shown = length(time_idx)
-        # Time axis must be thinned on the same indices as the per-track arrays, or the
-        # browser indexes past the end of the series.
         t_days = [round(times[t] / 86400.0, digits = 3) for t in time_idx]
         decimated = (n_tracks_shown < n_p) || (n_points_shown < n_t)
         if decimated
             @info "export_interactive_tracks_html: decimated payload to " *
-                  "$n_tracks_shown of $n_p tracks and $n_points_shown of $n_t time points " *
-                  "(inline JSON cannot hold the full $n_p x $n_t). Statistics are computed " *
-                  "from the full-resolution data and are unaffected."
+                  "$n_tracks_shown of $n_p tracks and $n_points_shown of $n_t time points. " *
+                  "Statistics are computed from full-resolution arrays and are unaffected."
         end
 
         p_entries = String[]
         for p in track_idx
-            p_lons = [round(lons[p, t], digits = 4) for t in time_idx]
-            p_lats = [round(lats[p, t], digits = 4) for t in time_idx]
-            p_depths = [round(depths[p, t], digits = 0) for t in time_idx]
-            p_temps = [round(temps[p, t], digits = 1) for t in time_idx]
-            p_dds = [round(dds[p, t], digits = 1) for t in time_idx]
-            p_survs = [round(survs[p, t], digits = 3) for t in time_idx]
+            p_lons = [_json_num(lons[p, t]; digits = 4) for t in time_idx]
+            p_lats = [_json_num(lats[p, t]; digits = 4) for t in time_idx]
+            p_depths = [_json_num(depths[p, t]; digits = 0) for t in time_idx]
+            p_temps = [_json_num(temps[p, t]; digits = 1) for t in time_idx]
+            p_dds = [_json_num(dds[p, t]; digits = 1) for t in time_idx]
+            p_survs = [_json_num(survs[p, t]; digits = 3) for t in time_idx]
             p_stages = [string(stages[p, t]) for t in time_idx]
 
             push!(p_entries, """{
                 "id": $(ids[p]),
                 "status": "$(statuses[p])",
                 "alive": $(alive[p]),
-                "settlement_age_days": $(round(ages[p] / 86400.0, digits = 2)),
+                "settlement_age_days": $(_json_num(ages[p] / 86400.0; digits = 2)),
                 "lons": [$(join(p_lons, ","))],
                 "lats": [$(join(p_lats, ","))],
                 "depths": [$(join(p_depths, ","))],
@@ -252,8 +256,10 @@ function export_interactive_tracks_html(
         n_alive = count(identity, alive)
         settle_pct = n_p > 0 ? round(100.0 * n_settled / n_p, digits = 1) : 0.0
         survival_pct = n_p > 0 ? round(100.0 * n_alive / n_p, digits = 1) : 0.0
-        mean_pld = round(mean([a / 86400.0 for a in ages]), digits = 1)
-        mean_temp_val = round(mean(temps), digits = 2)
+        finite_ages = filter(isfinite, [Float64(a) / 86400.0 for a in ages])
+        mean_pld = isempty(finite_ages) ? 0.0 : round(mean(finite_ages), digits = 1)
+        finite_temps = filter(isfinite, vec(temps))
+        mean_temp_val = isempty(finite_temps) ? 0.0 : round(mean(finite_temps), digits = 2)
 
         # Gridded settlement density, velocity quivers, and thermal field
         g_disp = run_data.gridded_dispersal
@@ -334,146 +340,6 @@ function export_interactive_tracks_html(
             end
         end
 
-        # 4. Hydrodynamic Model Outputs (Advection, Temperature, Salinity, Elevation, Upwelling, Bathymetry)
-        hydro_source = hasproperty(run_data, :hydrodynamics) && !isnothing(run_data.hydrodynamics) ?
-                       run_data.hydrodynamics :
-                       (hasproperty(run_data, :model) && !isnothing(run_data.model) ? run_data.model : hydrodynamics)
-
-        min_lon_p = minimum(lons) - 0.4
-        max_lon_p = maximum(lons) + 0.4
-        min_lat_p = minimum(lats) - 0.3
-        max_lat_p = maximum(lats) + 0.3
-        d_lon = (min_lon_p, max_lon_p)
-        d_lat = (min_lat_p, max_lat_p)
-
-        hydro_data = extract_hydrodynamic_dataset(
-            hydro_source,
-            domain_lon = d_lon,
-            domain_lat = d_lat,
-            grid_size = (35, 30)
-        )
-
-        h_lons = hydro_data.lons
-        h_lats = hydro_data.lats
-        h_depths = hydro_data.depths
-        nx_h = length(h_lons)
-        ny_h = length(h_lats)
-
-        nz_h = length(h_depths)
-        stride_h = max(1, round(Int, nx_h / 20))
-        has_hydro_bathy = !isnothing(hydro_data.bathymetry) &&
-                          ndims(hydro_data.bathymetry) == 2 &&
-                          size(hydro_data.bathymetry) == (nx_h, ny_h)
-
-        # Build depth_levels array for multi-depth interaction
-        depth_levels_entries = String[]
-        h_vec_entries_surface = String[]
-
-        for k_idx in 1:nz_h
-            vec_entries_k = String[]
-            for i in 1:stride_h:nx_h, j in 1:stride_h:ny_h
-                lon_v = round(h_lons[i], digits = 4)
-                lat_v = round(h_lats[j], digits = 4)
-                u_val = round(hydro_data.u[i, j, k_idx] * 100.0, digits = 2)
-                v_val = round(hydro_data.v[i, j, k_idx] * 100.0, digits = 2)
-                spd_val = round(hydro_data.speed[i, j, k_idx] * 100.0, digits = 2)
-                w_val = round(hydro_data.w[i, j, k_idx] * 1000.0, digits = 3)
-                t_val = round(hydro_data.temperature[i, j, k_idx], digits = 2)
-                s_val = round(hydro_data.salinity[i, j, k_idx], digits = 2)
-                strat_val = round(hydro_data.stratification[i, j, k_idx] * 10000.0, digits = 3)
-                diff_val = round(hydro_data.diffusion[i, j, k_idx] * 10000.0, digits = 3)
-                eta_val = round(hydro_data.elevation[i, j] * 100.0, digits = 1)
-                # Seabed depth is optional metadata; emit NaN when the source record
-                # carries no bathymetry so the Leaflet depth control is skipped rather
-                # than fabricated from an invented flat plane.
-                b_val = has_hydro_bathy ? round(hydro_data.bathymetry[i, j], digits = 1) : "null"
-                dir_deg = round(mod(90.0 - rad2deg(atan(hydro_data.v[i, j, k_idx], hydro_data.u[i, j, k_idx])), 360.0), digits = 1)
-
-                v_item = """{"lon":$(lon_v),"lat":$(lat_v),"u":$(u_val),"v":$(v_val),"speed":$(spd_val),"dir":$(dir_deg),"w":$(w_val),"temp":$(t_val),"sal":$(s_val),"strat":$(strat_val),"diff":$(diff_val),"eta":$(eta_val),"depth":$(b_val)}"""
-                push!(vec_entries_k, v_item)
-                if k_idx == 1
-                    push!(h_vec_entries_surface, v_item)
-                end
-            end
-
-            t_k_json = "[" * join(["[" * join([string(round(hydro_data.temperature[i, j, k_idx], digits = 2)) for j in 1:ny_h], ",") * "]" for i in 1:nx_h], ",") * "]"
-            s_k_json = "[" * join(["[" * join([string(round(hydro_data.salinity[i, j, k_idx], digits = 2)) for j in 1:ny_h], ",") * "]" for i in 1:nx_h], ",") * "]"
-            spd_k_json = "[" * join(["[" * join([string(round(hydro_data.speed[i, j, k_idx] * 100.0, digits = 2)) for j in 1:ny_h], ",") * "]" for i in 1:nx_h], ",") * "]"
-            w_k_json = "[" * join(["[" * join([string(round(hydro_data.w[i, j, k_idx] * 1000.0, digits = 3)) for j in 1:ny_h], ",") * "]" for i in 1:nx_h], ",") * "]"
-            strat_k_json = "[" * join(["[" * join([string(round(hydro_data.stratification[i, j, k_idx] * 10000.0, digits = 3)) for j in 1:ny_h], ",") * "]" for i in 1:nx_h], ",") * "]"
-            diff_k_json = "[" * join(["[" * join([string(round(hydro_data.diffusion[i, j, k_idx] * 10000.0, digits = 3)) for j in 1:ny_h], ",") * "]" for i in 1:nx_h], ",") * "]"
-
-            valid_t = filter(!isnan, hydro_data.temperature[:, :, k_idx])
-            valid_s = filter(!isnan, hydro_data.salinity[:, :, k_idx])
-            valid_spd = filter(!isnan, hydro_data.speed[:, :, k_idx] .* 100.0)
-            valid_w = filter(!isnan, hydro_data.w[:, :, k_idx] .* 1000.0)
-            valid_strat = filter(!isnan, hydro_data.stratification[:, :, k_idx] .* 10000.0)
-            valid_diff = filter(!isnan, hydro_data.diffusion[:, :, k_idx] .* 10000.0)
-
-            t_min_k, t_max_k = isempty(valid_t) ? (0.0, 15.0) : (round(minimum(valid_t), digits=2), round(maximum(valid_t), digits=2))
-            s_min_k, s_max_k = isempty(valid_s) ? (30.0, 35.0) : (round(minimum(valid_s), digits=2), round(maximum(valid_s), digits=2))
-            spd_max_k = isempty(valid_spd) ? 25.0 : round(maximum(valid_spd), digits=1)
-            w_min_k, w_max_k = isempty(valid_w) ? (-0.5, 0.5) : (round(minimum(valid_w), digits=2), round(maximum(valid_w), digits=2))
-            strat_min_k, strat_max_k = isempty(valid_strat) ? (0.0, 5.0) : (round(minimum(valid_strat), digits=2), round(maximum(valid_strat), digits=2))
-            diff_min_k, diff_max_k = isempty(valid_diff) ? (0.1, 10.0) : (round(minimum(valid_diff), digits=2), round(maximum(valid_diff), digits=2))
-
-            push!(depth_levels_entries, """{
-                "depth_m": $(round(h_depths[k_idx], digits=1)),
-                "vectors": [$(join(vec_entries_k, ","))],
-                "temperature": {"min": $(t_min_k), "max": $(t_max_k), "unit": "°C", "data": $(t_k_json)},
-                "salinity": {"min": $(s_min_k), "max": $(s_max_k), "unit": "PSU", "data": $(s_k_json)},
-                "speed": {"min": 0.0, "max": $(spd_max_k), "unit": "cm/s", "data": $(spd_k_json)},
-                "upwelling": {"min": $(w_min_k), "max": $(w_max_k), "unit": "mm/s", "data": $(w_k_json)},
-                "stratification": {"min": $(strat_min_k), "max": $(strat_max_k), "unit": "10⁻⁴ s⁻²", "data": $(strat_k_json)},
-                "diffusion": {"min": $(diff_min_k), "max": $(diff_max_k), "unit": "10⁻⁴ m²/s", "data": $(diff_k_json)}
-            }""")
-        end
-
-        eta_grid_json = "[" * join(["[" * join([string(round(hydro_data.elevation[i, j] * 100.0, digits = 1)) for j in 1:ny_h], ",") * "]" for i in 1:nx_h], ",") * "]"
-        # Bathymetry grid is optional: emit JSON nulls and a degenerate colour range when
-        # the source record carries no seabed, so the map renders without a depth layer
-        # instead of indexing a missing array.
-        bathy_grid_json = has_hydro_bathy ?
-            ("[" * join(["[" * join([string(round(hydro_data.bathymetry[i, j], digits = 1)) for j in 1:ny_h], ",") * "]" for i in 1:nx_h], ",") * "]") :
-            ("[" * join(["[" * join(["null" for _ in 1:ny_h], ",") * "]" for _ in 1:nx_h], ",") * "]")
-
-        valid_eta = filter(!isnan, hydro_data.elevation .* 100.0)
-        valid_b = has_hydro_bathy ? filter(isfinite, hydro_data.bathymetry) : Float64[]
-        eta_min = isempty(valid_eta) ? -10.0 : round(minimum(valid_eta), digits=1)
-        eta_max = isempty(valid_eta) ? 10.0 : round(maximum(valid_eta), digits=1)
-        b_min = isempty(valid_b) ? -3000.0 : round(minimum(valid_b), digits=1)
-        b_max = isempty(valid_b) ? 0.0 : round(maximum(valid_b), digits=1)
-
-        # Surface grids for backwards compatibility
-        t_min_s = isempty(filter(!isnan, hydro_data.temperature[:, :, 1])) ? 0.0 : round(minimum(filter(!isnan, hydro_data.temperature[:, :, 1])), digits=2)
-        t_max_s = isempty(filter(!isnan, hydro_data.temperature[:, :, 1])) ? 15.0 : round(maximum(filter(!isnan, hydro_data.temperature[:, :, 1])), digits=2)
-        s_min_s = isempty(filter(!isnan, hydro_data.salinity[:, :, 1])) ? 30.0 : round(minimum(filter(!isnan, hydro_data.salinity[:, :, 1])), digits=2)
-        s_max_s = isempty(filter(!isnan, hydro_data.salinity[:, :, 1])) ? 35.0 : round(maximum(filter(!isnan, hydro_data.salinity[:, :, 1])), digits=2)
-        spd_max_s = isempty(filter(!isnan, hydro_data.speed[:, :, 1] .* 100.0)) ? 25.0 : round(maximum(filter(!isnan, hydro_data.speed[:, :, 1] .* 100.0)), digits=1)
-        w_min_s = isempty(filter(!isnan, hydro_data.w[:, :, 1] .* 1000.0)) ? -0.5 : round(minimum(filter(!isnan, hydro_data.w[:, :, 1] .* 1000.0)), digits=2)
-        w_max_s = isempty(filter(!isnan, hydro_data.w[:, :, 1] .* 1000.0)) ? 0.5 : round(maximum(filter(!isnan, hydro_data.w[:, :, 1] .* 1000.0)), digits=2)
-
-        temp_s_json = "[" * join(["[" * join([string(round(hydro_data.temperature[i, j, 1], digits = 2)) for j in 1:ny_h], ",") * "]" for i in 1:nx_h], ",") * "]"
-        sal_s_json = "[" * join(["[" * join([string(round(hydro_data.salinity[i, j, 1], digits = 2)) for j in 1:ny_h], ",") * "]" for i in 1:nx_h], ",") * "]"
-        spd_s_json = "[" * join(["[" * join([string(round(hydro_data.speed[i, j, 1] * 100.0, digits = 2)) for j in 1:ny_h], ",") * "]" for i in 1:nx_h], ",") * "]"
-        w_s_json = "[" * join(["[" * join([string(round(hydro_data.w[i, j, 1] * 1000.0, digits = 3)) for j in 1:ny_h], ",") * "]" for i in 1:nx_h], ",") * "]"
-
-        hydro_json = """{
-            "lons": [$(join([string(round(x, digits=4)) for x in h_lons], ","))],
-            "lats": [$(join([string(round(y, digits=4)) for y in h_lats], ","))],
-            "depths": [$(join([string(round(z, digits=1)) for z in h_depths], ","))],
-            "depth_levels": [$(join(depth_levels_entries, ","))],
-            "vectors": [$(join(h_vec_entries_surface, ","))],
-            "grids": {
-                "temperature": {"min": $(t_min_s), "max": $(t_max_s), "unit": "°C", "data": $(temp_s_json)},
-                "salinity": {"min": $(s_min_s), "max": $(s_max_s), "unit": "PSU", "data": $(sal_s_json)},
-                "speed": {"min": 0.0, "max": $(spd_max_s), "unit": "cm/s", "data": $(spd_s_json)},
-                "elevation": {"min": $(eta_min), "max": $(eta_max), "unit": "cm", "data": $(eta_grid_json)},
-                "upwelling": {"min": $(w_min_s), "max": $(w_max_s), "unit": "mm/s", "data": $(w_s_json)},
-                "bathymetry": {"min": $(b_min), "max": $(b_max), "unit": "m", "data": $(bathy_grid_json)}
-            }
-        }"""
-
         run_json = """
         "$(run_key)": {
             "name": "$(run_key)",
@@ -491,8 +357,7 @@ function export_interactive_tracks_html(
             "settlement_density": [$(join(dens_entries, ","))],
             "velocity_quivers": [$(join(quiver_entries, ","))],
             "thermal_field": [$(join(therm_entries, ","))],
-            "connectivity_flows": [$(join(flow_entries, ","))],
-            "hydrodynamics": $(hydro_json)
+            "connectivity_flows": [$(join(flow_entries, ","))]
         }
         """
         push!(run_json_blocks, run_json)
@@ -500,6 +365,12 @@ function export_interactive_tracks_html(
 
     runs_master_json = "{\n" * join(run_json_blocks, ",\n") * "\n}"
     default_run_key = first(keys(runs_dict))
+    sidecar_path = replace(String(output_path), r"\.html?$"i => "") * ".data.zz"
+    sidecar_name = basename(sidecar_path)
+    sidecar_name_js = replace(sidecar_name, "\\" => "\\\\", "\"" => "\\\"")
+    raw_bytes = Vector{UInt8}(codeunits(runs_master_json))
+    compressed_bytes = Zarr.zcompress(raw_bytes, Zarr.ZlibCompressor(7))
+    write(sidecar_path, compressed_bytes)
 
     html_content = """<!DOCTYPE html>
 <html lang="en">
@@ -883,13 +754,66 @@ function export_interactive_tracks_html(
             padding: 6px 10px !important;
             line-height: 1.35 !important;
         }
+
+        #data-loader-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(11, 15, 25, 0.86);
+            backdrop-filter: blur(6px);
+        }
+
+        #data-loader-overlay.hidden { display: none; }
+
+        .loader-card {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 10px;
+            padding: 20px 24px;
+            max-width: 440px;
+            width: 90%;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+            text-align: center;
+        }
+
+        .loader-title {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--accent-blue);
+            margin-bottom: 8px;
+        }
+
+        .loader-status {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            line-height: 1.45;
+            margin-bottom: 12px;
+        }
+
+        .loader-btn {
+            display: inline-block;
+            padding: 8px 14px;
+            border-radius: 6px;
+            border: 1px solid var(--accent-blue);
+            background: rgba(56, 189, 248, 0.14);
+            color: var(--text-main);
+            font-family: var(--font-sans);
+            font-size: 0.82rem;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .loader-btn:hover { background: rgba(56, 189, 248, 0.24); }
     </style>
 </head>
 <body>
     <header>
         <div class="header-title">
-            <h1>Larval <span>Dispersal</span> & Ocean Hydrodynamics</h1>
-            <div class="header-subtitle">Multi-Run Hydrodynamic Particle Tracking Dashboard (*Chionoecetes opilio*)</div>
+            <h1>Larval <span>Dispersal</span> & Demographic Connectivity</h1>
+            <div class="header-subtitle">Multi-Run Lagrangian Particle Tracking Dashboard (*Chionoecetes opilio*)</div>
         </div>
         <div class="header-controls">
             <div class="run-selector-box">
@@ -947,22 +871,6 @@ function export_interactive_tracks_html(
                     <option value="-1">Overview (All Larvae)</option>
                 </select>
             </div>
-
-            <div class="control-section">
-                <h4>Hydrodynamic Depth Level</h4>
-                <select id="hydro-depth-select" class="control-select">
-                    <option value="0">Surface (0.0 m)</option>
-                </select>
-            </div>
-
-            <div class="control-section">
-                <h4>Hydrodynamic Layer Opacity</h4>
-                <div class="slider-control-row">
-                    <span>Alpha</span>
-                    <input type="range" id="hydro-opacity-slider" min="10" max="100" value="65">
-                    <span id="hydro-opacity-val" style="font-family:var(--font-mono)">65%</span>
-                </div>
-            </div>
         </div>
 
         <div class="floating-panel" id="layer-manager-dock">
@@ -985,37 +893,6 @@ function export_interactive_tracks_html(
                 </div>
                 <div class="layer-item">
                     <label><input type="checkbox" id="layer-density"> 🔥 Nursery Settlement Density</label>
-                </div>
-            </div>
-
-            <div class="layer-group-title">🌊 Hydrodynamic Model Outputs</div>
-            <div class="layer-toggle-group">
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-hydro-advection" checked> 💨 Advection Current Vectors</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-hydro-speed"> ⚡ Current Speed (|u_h|)</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-hydro-temp"> 🌡️ Seawater Temperature (T)</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-hydro-sal"> 🧂 Practical Salinity (S)</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-hydro-strat"> 📈 Buoyancy Stratification (N²)</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-hydro-diff"> 🌀 Turbulent Diffusivity (κ_v)</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-hydro-eta"> 🌊 Free Surface Height (η)</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-hydro-w"> ⬆️ Upwelling / Downwelling (w)</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-hydro-bathy"> 🗺️ Seafloor Bathymetry</label>
                 </div>
             </div>
 
@@ -1052,38 +929,47 @@ function export_interactive_tracks_html(
                 <span id="hud-id" style="font-family:var(--font-mono); color:#fff;">Overview</span>
             </div>
             <div class="hud-grid">
-                <div class="hud-item"><span class="hud-label">Stage / Mode</span><span class="hud-val" id="hud-stage">-</span></div>
-                <div class="hud-item"><span class="hud-label">Depth / Seabed</span><span class="hud-val" id="hud-depth">-</span></div>
+                <div class="hud-item"><span class="hud-label">Stage</span><span class="hud-val" id="hud-stage">-</span></div>
+                <div class="hud-item"><span class="hud-label">Depth</span><span class="hud-val" id="hud-depth">-</span></div>
                 <div class="hud-item"><span class="hud-label">Temp (T)</span><span class="hud-val" id="hud-temp">-</span></div>
-                <div class="hud-item"><span class="hud-label">Salinity (S)</span><span class="hud-val" id="hud-sal">-</span></div>
-                <div class="hud-item"><span class="hud-label">Current (|u|)</span><span class="hud-val" id="hud-current">-</span></div>
-                <div class="hud-item"><span class="hud-label">Strat (N²)</span><span class="hud-val" id="hud-strat">-</span></div>
-                <div class="hud-item"><span class="hud-label">Diffusivity (κ)</span><span class="hud-val" id="hud-diff">-</span></div>
-                <div class="hud-item"><span class="hud-label">Survival / SSH</span><span class="hud-val" id="hud-surv">-</span></div>
+                <div class="hud-item"><span class="hud-label">Degree-Days</span><span class="hud-val" id="hud-dd">-</span></div>
+                <div class="hud-item"><span class="hud-label">Survival</span><span class="hud-val" id="hud-surv">-</span></div>
+                <div class="hud-item"><span class="hud-label">Position</span><span class="hud-val" id="hud-pos">-</span></div>
             </div>
         </div>
 
         <div class="floating-panel" id="legend-dock">
             <div class="legend-header">
-                <span id="legend-title">Seawater Temperature</span>
-                <span id="legend-unit" style="font-family:var(--font-mono)">°C</span>
+                <span id="legend-title">Nursery Settlement Density</span>
+                <span id="legend-unit" style="font-family:var(--font-mono)">%</span>
             </div>
-            <div class="legend-bar" id="legend-bar" style="background: linear-gradient(to right, #1d4ed8, #06b6d4, #10b981, #f59e0b, #ef4444);"></div>
+            <div class="legend-bar" id="legend-bar" style="background: linear-gradient(to right, #1e3a8a, #06b6d4, #f59e0b, #ef4444);"></div>
             <div class="legend-labels">
                 <span id="legend-min">0.0</span>
-                <span id="legend-mid">7.5</span>
-                <span id="legend-max">15.0</span>
+                <span id="legend-mid">50.0</span>
+                <span id="legend-max">100.0</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="data-loader-overlay">
+        <div class="loader-card">
+            <div class="loader-title">Loading Trajectory Payload</div>
+            <div class="loader-status" id="loader-status">Fetching $(sidecar_name)...</div>
+            <div id="loader-picker" style="display:none;">
+                <input type="file" id="sidecar-file-input" accept=".zz,.bin,.gz" style="display:none;" />
+                <label for="sidecar-file-input" class="loader-btn">Select $(sidecar_name)</label>
             </div>
         </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script>
-        const RUNS = $(runs_master_json);
+        const SIDECAR_FILE = "$(sidecar_name_js)";
         const STRATA = $(strata_json);
+        let RUNS = {};
         let activeRunKey = "$(default_run_key)";
-        let currentRun = RUNS[activeRunKey];
-        const PARTICLES = currentRun.particles;
+        let currentRun = null;
 
         const STAGE_COLORS = {
             "zoea1": "#38bdf8", "zoea2": "#06b6d4", "zoea3": "#0d9488", "zoea4": "#eab308",
@@ -1106,150 +992,15 @@ function export_interactive_tracks_html(
         const settlementDensityLayer = L.layerGroup();
         const connectivityFlowsLayer = L.layerGroup();
 
-        // Hydrodynamic Model Eulerian Layers
-        const hydroAdvectionLayer = L.layerGroup().addTo(map);
-        const hydroSpeedLayer = L.layerGroup();
-        const hydroTempLayer = L.layerGroup();
-        const hydroSalLayer = L.layerGroup();
-        const hydroStratLayer = L.layerGroup();
-        const hydroDiffLayer = L.layerGroup();
-        const hydroEtaLayer = L.layerGroup();
-        const hydroUpwellingLayer = L.layerGroup();
-        const hydroBathyLayer = L.layerGroup();
-        let selectedDepthIdx = 0;
-
         STRATA.forEach(s => {
             let layer = s.is_polygon ? L.polygon(s.polygon, {color: s.color, weight: 2.2, fillOpacity: 0.08}) : L.rectangle([[s.lat_min, s.lon_min], [s.lat_max, s.lon_max]], {color: s.color, weight: 2, fillOpacity: 0.06});
             layer.bindTooltip("<b>" + s.name + "</b>").addTo(strataLayer);
         });
 
         const runSelect = document.getElementById('run-select');
-        Object.keys(RUNS).forEach(k => {
-            const opt = document.createElement('option'); opt.value = k; opt.textContent = k;
-            if (k === activeRunKey) opt.selected = true;
-            runSelect.appendChild(opt);
-        });
 
         let currentStep = 0, isPlaying = false, playSpeed = 1, animTimer = null, showTrails = true, colorMode = "stage", outcomeFilter = "all", focusParticleId = -1;
-        let hydroOpacity = 0.65;
         let headMarkers = [], fullTrackPolylines = [], progressTrackPolylines = [];
-
-        // Scientific Colormaps
-        function colormapThermal(norm) {
-            if (norm < 0.25) {
-                const t = norm / 0.25;
-                return [Math.round(29 + t * (6 - 29)), Math.round(78 + t * (182 - 78)), Math.round(216 + t * (212 - 216)), 255];
-            } else if (norm < 0.5) {
-                const t = (norm - 0.25) / 0.25;
-                return [Math.round(6 + t * (16 - 6)), Math.round(182 + t * (185 - 182)), Math.round(212 + t * (129 - 212)), 255];
-            } else if (norm < 0.75) {
-                const t = (norm - 0.5) / 0.25;
-                return [Math.round(16 + t * (245 - 16)), Math.round(185 + t * (158 - 185)), Math.round(129 + t * (11 - 129)), 255];
-            } else {
-                const t = (norm - 0.75) / 0.25;
-                return [Math.round(245 + t * (239 - 245)), Math.round(158 + t * (68 - 158)), Math.round(11 + t * (68 - 11)), 255];
-            }
-        }
-
-        function colormapHaline(norm) {
-            const r = Math.round(15 + norm * 150);
-            const g = Math.round(180 - norm * 110);
-            const b = Math.round(180 + norm * 60);
-            return [r, g, b, 255];
-        }
-
-        function colormapTurbo(norm) {
-            const r = Math.round(255 * Math.min(1.0, Math.max(0.0, 1.5 - Math.abs(norm - 0.75) * 4)));
-            const g = Math.round(255 * Math.min(1.0, Math.max(0.0, 1.5 - Math.abs(norm - 0.5) * 4)));
-            const b = Math.round(255 * Math.min(1.0, Math.max(0.0, 1.5 - Math.abs(norm - 0.25) * 4)));
-            return [r, g, b, 255];
-        }
-
-        function colormapCoolwarm(norm) {
-            const r = Math.round(59 + norm * (220 - 59));
-            const g = Math.round(76 + (1 - Math.abs(norm - 0.5) * 2) * 120);
-            const b = Math.round(192 - norm * (192 - 40));
-            return [r, g, b, 255];
-        }
-
-        function colormapBalance(norm) {
-            if (norm < 0.5) {
-                const t = norm / 0.5;
-                return [Math.round(30 + t * 160), Math.round(64 + t * 130), Math.round(175 + t * 20), 255];
-            } else {
-                const t = (norm - 0.5) / 0.5;
-                return [Math.round(190 + t * 49), Math.round(194 - t * 140), Math.round(195 - t * 140), 255];
-            }
-        }
-
-        function colormapOcean(norm) {
-            const r = Math.round(10 + norm * 80);
-            const g = Math.round(40 + norm * 140);
-            const b = Math.round(90 + norm * 130);
-            return [r, g, b, 255];
-        }
-
-        function colormapViridis(norm) {
-            const r = Math.round(68 + norm * 185);
-            const g = Math.round(1 + norm * 230);
-            const b = Math.round(84 + (1 - norm) * 110 + norm * 15);
-            return [Math.min(255, Math.max(0, r)), Math.min(255, Math.max(0, g)), Math.min(255, Math.max(0, b)), 255];
-        }
-
-        function colormapPlasma(norm) {
-            const r = Math.round(13 + norm * 225);
-            const g = Math.round(8 + Math.sin(norm * Math.PI) * 180);
-            const b = Math.round(135 * (1 - norm) + 30);
-            return [Math.min(255, Math.max(0, r)), Math.min(255, Math.max(0, g)), Math.min(255, Math.max(0, b)), 255];
-        }
-
-        function generateRasterDataURL(grid2D, lons, lats, minVal, maxVal, colormapFn) {
-            const width = 200;
-            const height = 150;
-            const canvas = document.createElement('canvas');
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            const imgData = ctx.createImageData(width, height);
-            const data = imgData.data;
-
-            const nx = lons.length;
-            const ny = lats.length;
-            const range = Math.max(1e-5, maxVal - minVal);
-
-            for (let py = 0; py < height; py++) {
-                const latFrac = 1.0 - (py / (height - 1));
-                const yIdx = latFrac * (ny - 1);
-                const j0 = Math.floor(yIdx);
-                const j1 = Math.min(ny - 1, j0 + 1);
-                const fy = yIdx - j0;
-
-                for (let px = 0; px < width; px++) {
-                    const lonFrac = px / (width - 1);
-                    const xIdx = lonFrac * (nx - 1);
-                    const i0 = Math.floor(xIdx);
-                    const i1 = Math.min(nx - 1, i0 + 1);
-                    const fx = xIdx - i0;
-
-                    const v00 = grid2D[i0][j0];
-                    const v10 = grid2D[i1][j0];
-                    const v01 = grid2D[i0][j1];
-                    const v11 = grid2D[i1][j1];
-
-                    const val = (1 - fx) * (1 - fy) * v00 + fx * (1 - fy) * v10 + (1 - fx) * fy * v01 + fx * fy * v11;
-                    const norm = Math.min(1.0, Math.max(0.0, (val - minVal) / range));
-                    const rgba = colormapFn(norm);
-
-                    const pIndex = (py * width + px) * 4;
-                    data[pIndex] = rgba[0];
-                    data[pIndex + 1] = rgba[1];
-                    data[pIndex + 2] = rgba[2];
-                    data[pIndex + 3] = rgba[3];
-                }
-            }
-            ctx.putImageData(imgData, 0, 0);
-            return canvas.toDataURL();
-        }
 
         function getColor(p, step) {
             if (colorMode === "stage") return STAGE_COLORS[p.stages[step]] || "#38bdf8";
@@ -1257,8 +1008,6 @@ function export_interactive_tracks_html(
             if (colorMode === "temp") return p.temps[step] < 6 ? "#38bdf8" : "#f87171";
             return p.dds[step] < 100 ? "#38bdf8" : "#f97316";
         }
-
-        let activeRasterLayers = [];
 
         function updateLegend(title, unit, minV, maxV, gradientCss) {
             document.getElementById('legend-title').textContent = title;
@@ -1269,109 +1018,13 @@ function export_interactive_tracks_html(
             document.getElementById('legend-bar').style.background = gradientCss;
         }
 
-        function rebuildHydroLayers() {
-            [hydroAdvectionLayer, hydroSpeedLayer, hydroTempLayer, hydroSalLayer,
-             hydroStratLayer, hydroDiffLayer, hydroUpwellingLayer].forEach(l => l.clearLayers());
-
-            const hydro = currentRun.hydrodynamics;
-            if (!hydro || !hydro.lons || !hydro.lats) return;
-
-            const hLons = hydro.lons;
-            const hLats = hydro.lats;
-            const bounds = [[Math.min(...hLats), Math.min(...hLons)], [Math.max(...hLats), Math.max(...hLons)]];
-
-            const lvl = (hydro.depth_levels && hydro.depth_levels[selectedDepthIdx]) ? hydro.depth_levels[selectedDepthIdx] : null;
-            const vecs = lvl ? lvl.vectors : (hydro.vectors || []);
-            const curDepth = lvl ? Math.abs(lvl.depth_m).toFixed(1) : "0.0";
-
-            // A. Advection Current Vectors (Quivers)
-            if (vecs && vecs.length > 0) {
-                vecs.forEach(vec => {
-                    const lenScale = 0.0035 * Math.min(18.0, Math.max(1.0, vec.speed));
-                    const lat2 = vec.lat + (vec.v / Math.max(0.1, vec.speed)) * lenScale;
-                    const lon2 = vec.lon + (vec.u / Math.max(0.1, vec.speed)) * lenScale * 1.35;
-
-                    const spdNorm = Math.min(1.0, vec.speed / 20.0);
-                    const arrowCol = spdNorm > 0.6 ? '#f43f5e' : spdNorm > 0.3 ? '#38bdf8' : '#34d399';
-
-                    const line = L.polyline([[vec.lat, vec.lon], [lat2, lon2]], {
-                        color: arrowCol,
-                        weight: 2.2,
-                        opacity: 0.85
-                    }).bindTooltip(`<b>Hydrodynamic Current Vector</b><br>Depth: <b>\${curDepth} m</b><br>Speed: <b>\${vec.speed} cm/s</b> (\${(vec.speed*0.0194).toFixed(2)} kts)<br>Dir: \${vec.dir}°<br>u: \${vec.u} cm/s, v: \${vec.v} cm/s<br>Temp: \${vec.temp} °C | Salinity: \${vec.sal} PSU<br>Strat N²: \${vec.strat !== undefined ? vec.strat : '-'} 10⁻⁴s⁻²<br>Diff κ_v: \${vec.diff !== undefined ? vec.diff : '-'} 10⁻⁴m²/s<br>Seabed Depth: \${vec.depth} m`);
-                    hydroAdvectionLayer.addLayer(line);
-
-                    const tip = L.circleMarker([lat2, lon2], {
-                        radius: 2.5,
-                        color: arrowCol,
-                        fillColor: arrowCol,
-                        fillOpacity: 1.0,
-                        weight: 1
-                    });
-                    hydroAdvectionLayer.addLayer(tip);
-                });
-            }
-
-            // B. Multi-depth Grids
-            const tGrid = lvl ? lvl.temperature : hydro.grids?.temperature;
-            if (tGrid) {
-                const tUrl = generateRasterDataURL(tGrid.data, hLons, hLats, tGrid.min, tGrid.max, colormapThermal);
-                const tOverlay = L.imageOverlay(tUrl, bounds, { opacity: hydroOpacity, interactive: false });
-                hydroTempLayer.addLayer(tOverlay);
-                activeRasterLayers.push(tOverlay);
-            }
-
-            const sGrid = lvl ? lvl.salinity : hydro.grids?.salinity;
-            if (sGrid) {
-                const sUrl = generateRasterDataURL(sGrid.data, hLons, hLats, sGrid.min, sGrid.max, colormapHaline);
-                const sOverlay = L.imageOverlay(sUrl, bounds, { opacity: hydroOpacity, interactive: false });
-                hydroSalLayer.addLayer(sOverlay);
-                activeRasterLayers.push(sOverlay);
-            }
-
-            const spdGrid = lvl ? lvl.speed : hydro.grids?.speed;
-            if (spdGrid) {
-                const spdUrl = generateRasterDataURL(spdGrid.data, hLons, hLats, 0.0, spdGrid.max, colormapTurbo);
-                const spdOverlay = L.imageOverlay(spdUrl, bounds, { opacity: hydroOpacity, interactive: false });
-                hydroSpeedLayer.addLayer(spdOverlay);
-                activeRasterLayers.push(spdOverlay);
-            }
-
-            const stratGrid = lvl ? lvl.stratification : null;
-            if (stratGrid) {
-                const stratUrl = generateRasterDataURL(stratGrid.data, hLons, hLats, stratGrid.min, stratGrid.max, colormapViridis);
-                const stratOverlay = L.imageOverlay(stratUrl, bounds, { opacity: hydroOpacity, interactive: false });
-                hydroStratLayer.addLayer(stratOverlay);
-                activeRasterLayers.push(stratOverlay);
-            }
-
-            const diffGrid = lvl ? lvl.diffusion : null;
-            if (diffGrid) {
-                const diffUrl = generateRasterDataURL(diffGrid.data, hLons, hLats, diffGrid.min, diffGrid.max, colormapPlasma);
-                const diffOverlay = L.imageOverlay(diffUrl, bounds, { opacity: hydroOpacity, interactive: false });
-                hydroDiffLayer.addLayer(diffOverlay);
-                activeRasterLayers.push(diffOverlay);
-            }
-
-            const wGrid = lvl ? lvl.upwelling : hydro.grids?.upwelling;
-            if (wGrid) {
-                const wUrl = generateRasterDataURL(wGrid.data, hLons, hLats, wGrid.min, wGrid.max, colormapBalance);
-                const wOverlay = L.imageOverlay(wUrl, bounds, { opacity: hydroOpacity, interactive: false });
-                hydroUpwellingLayer.addLayer(wOverlay);
-                activeRasterLayers.push(wOverlay);
-            }
-        }
-
         function renderActiveRun() {
             [fullTracksLayer, progressTracksLayer, activeHeadsLayer, releaseMarkersLayer,
-             settlementMarkersLayer, settlementDensityLayer, hydroAdvectionLayer,
-             hydroSpeedLayer, hydroTempLayer, hydroSalLayer, hydroStratLayer, hydroDiffLayer,
-             hydroEtaLayer, hydroUpwellingLayer, hydroBathyLayer, connectivityFlowsLayer].forEach(l => l.clearLayers());
+             settlementMarkersLayer, settlementDensityLayer, connectivityFlowsLayer].forEach(l => l.clearLayers());
 
             headMarkers = [];
             fullTrackPolylines = [];
             progressTrackPolylines = [];
-            activeRasterLayers = [];
 
             const pList = currentRun.particles;
             const nTimes = currentRun.times.length;
@@ -1443,56 +1096,7 @@ function export_interactive_tracks_html(
                 }
             });
 
-            // 3. Hydrodynamic Model Outputs Setup
-            const hydro = currentRun.hydrodynamics;
-            selectedDepthIdx = 0;
-            const depthSelect = document.getElementById('hydro-depth-select');
-            if (depthSelect) {
-                depthSelect.innerHTML = '';
-                if (hydro && hydro.depths && hydro.depths.length > 0) {
-                    hydro.depths.forEach((d, idx) => {
-                        const opt = document.createElement('option');
-                        opt.value = idx;
-                        opt.textContent = `\${Math.abs(d).toFixed(1)} m \${d === 0 ? "(Surface)" : "(Subsurface)"}`;
-                        if (idx === selectedDepthIdx) opt.selected = true;
-                        depthSelect.appendChild(opt);
-                    });
-                } else {
-                    const opt = document.createElement('option');
-                    opt.value = 0;
-                    opt.textContent = 'Surface (0.0 m)';
-                    depthSelect.appendChild(opt);
-                }
-            }
-
-            if (hydro && hydro.lons && hydro.lats) {
-                const hLons = hydro.lons;
-                const hLats = hydro.lats;
-                const bounds = [[Math.min(...hLats), Math.min(...hLons)], [Math.max(...hLats), Math.max(...hLons)]];
-
-                // Static 2D Fields: Elevation and Bathymetry
-                const g = hydro.grids;
-                if (g) {
-                    if (g.elevation) {
-                        const etaUrl = generateRasterDataURL(g.elevation.data, hLons, hLats, g.elevation.min, g.elevation.max, colormapCoolwarm);
-                        const etaOverlay = L.imageOverlay(etaUrl, bounds, { opacity: hydroOpacity, interactive: false });
-                        hydroEtaLayer.addLayer(etaOverlay);
-                        activeRasterLayers.push(etaOverlay);
-                    }
-
-                    if (g.bathymetry) {
-                        const bUrl = generateRasterDataURL(g.bathymetry.data, hLons, hLats, g.bathymetry.min, 0.0, colormapOcean);
-                        const bOverlay = L.imageOverlay(bUrl, bounds, { opacity: hydroOpacity, interactive: false });
-                        hydroBathyLayer.addLayer(bOverlay);
-                        activeRasterLayers.push(bOverlay);
-                    }
-                }
-
-                // Render dynamic depth-dependent fields
-                rebuildHydroLayers();
-            }
-
-            // 4. Nursery Settlement Density Heatmap
+            // 3. Nursery Settlement Density Heatmap
             if (currentRun.settlement_density && currentRun.settlement_density.length > 0) {
                 const maxDens = Math.max(...currentRun.settlement_density.map(d => d.density));
                 currentRun.settlement_density.forEach(d => {
@@ -1538,17 +1142,27 @@ function export_interactive_tracks_html(
             slider.max = nTimes - 1;
             slider.value = 0;
 
-            // Auto-fit Bounds
-            const allLats = pList.flatMap(p => p.lats);
-            const allLons = pList.flatMap(p => p.lons);
-            if (allLats.length > 0) {
+            // Auto-fit Bounds (iterative min/max to avoid V8 call-stack limits on large cohorts)
+            let minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+            for (const p of pList) {
+                for (let t = 0; t < p.lats.length; t++) {
+                    const la = p.lats[t], lo = p.lons[t];
+                    if (la !== null && Number.isFinite(la) && lo !== null && Number.isFinite(lo)) {
+                        if (la < minLat) minLat = la;
+                        if (la > maxLat) maxLat = la;
+                        if (lo < minLon) minLon = lo;
+                        if (lo > maxLon) maxLon = lo;
+                    }
+                }
+            }
+            if (Number.isFinite(minLat)) {
                 map.fitBounds([
-                    [Math.min(...allLats) - 0.25, Math.min(...allLons) - 0.25],
-                    [Math.max(...allLats) + 0.25, Math.max(...allLons) + 0.25]
+                    [minLat - 0.25, minLon - 0.25],
+                    [maxLat + 0.25, maxLon + 0.25]
                 ]);
             }
 
-            updateLegend("Seawater Temperature (T)", "°C", (hydro && hydro.grids && hydro.grids.temperature) ? hydro.grids.temperature.min : "1.5", (hydro && hydro.grids && hydro.grids.temperature) ? hydro.grids.temperature.max : "14.5", "linear-gradient(to right, #1d4ed8, #06b6d4, #10b981, #f59e0b, #ef4444)");
+            updateLegend("Nursery Settlement Density", "%", "0.0", "100.0", "linear-gradient(to right, #1e3a8a, #06b6d4, #f59e0b, #ef4444)");
             updateFrame(0);
         }
 
@@ -1638,13 +1252,14 @@ function export_interactive_tracks_html(
         function updateHUD(p, step) {
             document.getElementById('hud-id').textContent = `#\${p.id}`;
             document.getElementById('hud-stage').textContent = p.stages[step];
-            document.getElementById('hud-depth').textContent = `\${p.depths[step].toFixed(1)} m`;
-            document.getElementById('hud-temp').textContent = `\${p.temps[step].toFixed(2)} °C`;
-            document.getElementById('hud-sal').textContent = `33.2 PSU`;
-            document.getElementById('hud-current').textContent = `~8.5 cm/s`;
-            document.getElementById('hud-strat').textContent = `0.85 10⁻⁴s⁻²`;
-            document.getElementById('hud-diff').textContent = `2.5 10⁻⁴m²/s`;
-            document.getElementById('hud-surv').textContent = `\${(p.survs[step] * 100).toFixed(1)} %`;
+            document.getElementById('hud-depth').textContent = p.depths[step] !== null ? `\${p.depths[step].toFixed(1)} m` : '-';
+            document.getElementById('hud-temp').textContent = p.temps[step] !== null ? `\${p.temps[step].toFixed(2)} °C` : '-';
+            document.getElementById('hud-dd').textContent = p.dds[step] !== null ? `\${p.dds[step].toFixed(1)} DD` : '-';
+            document.getElementById('hud-surv').textContent = p.survs[step] !== null ? `\${(p.survs[step] * 100).toFixed(1)} %` : '-';
+            document.getElementById('hud-pos').textContent =
+                (p.lats[step] !== null && p.lons[step] !== null)
+                    ? `\${p.lats[step].toFixed(2)}°N, \${p.lons[step].toFixed(2)}°E`
+                    : '-';
         }
 
         function selectParticle(id) {
@@ -1667,38 +1282,11 @@ function export_interactive_tracks_html(
             animTimer = setTimeout(playLoop, 60);
         }
 
-        // Live Cursor Telemetry Probe
+        // Cursor Coordinate Readout
         map.on('mousemove', function(e) {
             if (focusParticleId !== -1) return;
-            const lat = e.latlng.lat;
-            const lon = e.latlng.lng;
-            const hydro = currentRun.hydrodynamics;
-            if (hydro && hydro.lons && hydro.lats) {
-                const hLons = hydro.lons;
-                const hLats = hydro.lats;
-                const minLon = hLons[0], maxLon = hLons[hLons.length - 1];
-                const minLat = hLats[0], maxLat = hLats[hLats.length - 1];
-
-                if (lon >= minLon && lon <= maxLon && lat >= minLat && lat <= maxLat) {
-                    const nx = hLons.length, ny = hLats.length;
-                    const i = Math.min(nx - 1, Math.max(0, Math.floor(((lon - minLon) / (maxLon - minLon)) * (nx - 1))));
-                    const j = Math.min(ny - 1, Math.max(0, Math.floor(((lat - minLat) / (maxLat - minLat)) * (ny - 1))));
-
-                    const lvl = (hydro.depth_levels && hydro.depth_levels[selectedDepthIdx]) ? hydro.depth_levels[selectedDepthIdx] : null;
-                    const curDepth = (hydro.depths && hydro.depths.length > selectedDepthIdx) ? Math.abs(hydro.depths[selectedDepthIdx]).toFixed(1) : "0.0";
-                    const g = hydro.grids;
-
-                    document.getElementById('hud-id').textContent = `\${lat.toFixed(2)}°N, \${lon.toFixed(2)}°E`;
-                    document.getElementById('hud-stage').textContent = `Eulerian @ \${curDepth}m`;
-                    document.getElementById('hud-depth').textContent = `\${g && g.bathymetry ? g.bathymetry.data[i][j] : -120} m`;
-                    document.getElementById('hud-temp').textContent = `\${lvl && lvl.temperature ? lvl.temperature.data[i][j] : (g && g.temperature ? g.temperature.data[i][j] : 8.0)} °C`;
-                    document.getElementById('hud-sal').textContent = `\${lvl && lvl.salinity ? lvl.salinity.data[i][j] : (g && g.salinity ? g.salinity.data[i][j] : 32.5)} PSU`;
-                    document.getElementById('hud-current').textContent = `\${lvl && lvl.speed ? lvl.speed.data[i][j] : (g && g.speed ? g.speed.data[i][j] : 8.0)} cm/s`;
-                    document.getElementById('hud-strat').textContent = `\${lvl && lvl.stratification ? lvl.stratification.data[i][j] : '-'} 10⁻⁴s⁻²`;
-                    document.getElementById('hud-diff').textContent = `\${lvl && lvl.diffusion ? lvl.diffusion.data[i][j] : '-'} 10⁻⁴m²/s`;
-                    document.getElementById('hud-surv').textContent = `SSH \${g && g.elevation ? g.elevation.data[i][j] : 0.0} cm`;
-                }
-            }
+            document.getElementById('hud-id').textContent =
+                `\${e.latlng.lat.toFixed(2)}°N, \${e.latlng.lng.toFixed(2)}°E`;
         });
 
         // Layer Manager Event Listeners
@@ -1709,45 +1297,9 @@ function export_interactive_tracks_html(
             { id: 'layer-release', layer: releaseMarkersLayer },
             { id: 'layer-settle', layer: settlementMarkersLayer },
             { id: 'layer-density', layer: settlementDensityLayer, onSelect: () => updateLegend("Nursery Settlement Density", "%", "0.0", "100.0", "linear-gradient(to right, #1e3a8a, #06b6d4, #f59e0b, #ef4444)") },
-            { id: 'layer-hydro-advection', layer: hydroAdvectionLayer },
-            { id: 'layer-hydro-speed', layer: hydroSpeedLayer, onSelect: () => {
-                const lvl = currentRun.hydrodynamics?.depth_levels?.[selectedDepthIdx];
-                updateLegend("Current Speed (|u_h|)", "cm/s", "0.0", (lvl && lvl.speed) ? lvl.speed.max : (currentRun.hydrodynamics?.grids?.speed?.max || "25.0"), "linear-gradient(to right, #3b82f6, #06b6d4, #10b981, #facc15, #ef4444)");
-            }},
-            { id: 'layer-hydro-temp', layer: hydroTempLayer, onSelect: () => {
-                const lvl = currentRun.hydrodynamics?.depth_levels?.[selectedDepthIdx];
-                updateLegend("Seawater Temperature (T)", "°C", (lvl && lvl.temperature) ? lvl.temperature.min : (currentRun.hydrodynamics?.grids?.temperature?.min || "1.5"), (lvl && lvl.temperature) ? lvl.temperature.max : (currentRun.hydrodynamics?.grids?.temperature?.max || "14.5"), "linear-gradient(to right, #1d4ed8, #06b6d4, #10b981, #f59e0b, #ef4444)");
-            }},
-            { id: 'layer-hydro-sal', layer: hydroSalLayer, onSelect: () => {
-                const lvl = currentRun.hydrodynamics?.depth_levels?.[selectedDepthIdx];
-                updateLegend("Practical Salinity (S)", "PSU", (lvl && lvl.salinity) ? lvl.salinity.min : (currentRun.hydrodynamics?.grids?.salinity?.min || "31.0"), (lvl && lvl.salinity) ? lvl.salinity.max : (currentRun.hydrodynamics?.grids?.salinity?.max || "35.5"), "linear-gradient(to right, #10b981, #06b6d4, #3b82f6, #6366f1, #8b5cf6)");
-            }},
-            { id: 'layer-hydro-strat', layer: hydroStratLayer, onSelect: () => {
-                const lvl = currentRun.hydrodynamics?.depth_levels?.[selectedDepthIdx];
-                updateLegend("Stratification (N²)", "10⁻⁴ s⁻²", (lvl && lvl.stratification) ? lvl.stratification.min : "0.0", (lvl && lvl.stratification) ? lvl.stratification.max : "5.0", "linear-gradient(to right, #440154, #3b528b, #21908c, #5dc963, #fde725)");
-            }},
-            { id: 'layer-hydro-diff', layer: hydroDiffLayer, onSelect: () => {
-                const lvl = currentRun.hydrodynamics?.depth_levels?.[selectedDepthIdx];
-                updateLegend("Turbulent Diffusivity (κ_v)", "10⁻⁴ m²/s", (lvl && lvl.diffusion) ? lvl.diffusion.min : "0.1", (lvl && lvl.diffusion) ? lvl.diffusion.max : "10.0", "linear-gradient(to right, #0d0887, #6a00a8, #b12a90, #e16462, #fca636, #f0f921)");
-            }},
-            { id: 'layer-hydro-eta', layer: hydroEtaLayer, onSelect: () => updateLegend("Free Surface Height (η)", "cm", currentRun.hydrodynamics?.grids?.elevation?.min || "-10.0", currentRun.hydrodynamics?.grids?.elevation?.max || "+10.0", "linear-gradient(to right, #3b82f6, #f8fafc, #ef4444)") },
-            { id: 'layer-hydro-w', layer: hydroUpwellingLayer, onSelect: () => {
-                const lvl = currentRun.hydrodynamics?.depth_levels?.[selectedDepthIdx];
-                updateLegend("Vertical Velocity / Upwelling", "mm/s", (lvl && lvl.upwelling) ? lvl.upwelling.min : (currentRun.hydrodynamics?.grids?.upwelling?.min || "-0.5"), (lvl && lvl.upwelling) ? lvl.upwelling.max : (currentRun.hydrodynamics?.grids?.upwelling?.max || "+0.5"), "linear-gradient(to right, #1e40af, #94a3b8, #b91c1c)");
-            }},
-            { id: 'layer-hydro-bathy', layer: hydroBathyLayer, onSelect: () => updateLegend("Seafloor Bathymetry", "m", currentRun.hydrodynamics?.grids?.bathymetry?.min || "-3000", "0", "linear-gradient(to right, #030712, #1e3a8a, #0284c7, #38bdf8)") },
             { id: 'layer-strata', layer: strataLayer },
             { id: 'layer-conn', layer: connectivityFlowsLayer }
         ];
-
-        function updateActiveHydroLegend() {
-            layerControls.forEach(ctrl => {
-                const el = document.getElementById(ctrl.id);
-                if (el && el.checked && ctrl.onSelect) {
-                    ctrl.onSelect();
-                }
-            });
-        }
 
         layerControls.forEach(ctrl => {
             const el = document.getElementById(ctrl.id);
@@ -1762,28 +1314,6 @@ function export_interactive_tracks_html(
                 });
             }
         });
-
-        // Hydrodynamic Depth Select Listener
-        const depthSelect = document.getElementById('hydro-depth-select');
-        if (depthSelect) {
-            depthSelect.addEventListener('change', function(e) {
-                selectedDepthIdx = parseInt(e.target.value);
-                rebuildHydroLayers();
-                updateActiveHydroLegend();
-            });
-        }
-
-        // Hydrodynamic Opacity Slider
-        const opacitySlider = document.getElementById('hydro-opacity-slider');
-        if (opacitySlider) {
-            opacitySlider.addEventListener('input', function(e) {
-                hydroOpacity = parseFloat(e.target.value) / 100.0;
-                document.getElementById('hydro-opacity-val').textContent = e.target.value + "%";
-                activeRasterLayers.forEach(layer => {
-                    if (layer && layer.setOpacity) layer.setOpacity(hydroOpacity);
-                });
-            });
-        }
 
         // Controller Event Listeners
         document.getElementById('play-btn').addEventListener('click', function() {
@@ -1826,15 +1356,84 @@ function export_interactive_tracks_html(
             selectParticle(parseInt(e.target.value));
         });
 
-        // Initialize First Render
-        renderActiveRun();
+        async function decodeZlibJson(stream) {
+            if (typeof DecompressionStream === "undefined") {
+                throw new Error("Browser does not support DecompressionStream.");
+            }
+            const decompressed = stream.pipeThrough(new DecompressionStream("deflate"));
+            const text = await new Response(decompressed).text();
+            return JSON.parse(text);
+        }
+
+        function bootWithRuns(runsObj) {
+            RUNS = runsObj;
+            const keys = Object.keys(RUNS);
+            if (keys.length === 0) {
+                throw new Error("Sidecar payload contains no simulation runs.");
+            }
+            if (!RUNS[activeRunKey]) {
+                activeRunKey = keys[0];
+            }
+            currentRun = RUNS[activeRunKey];
+            runSelect.innerHTML = "";
+            keys.forEach(k => {
+                const opt = document.createElement('option');
+                opt.value = k;
+                opt.textContent = k;
+                if (k === activeRunKey) opt.selected = true;
+                runSelect.appendChild(opt);
+            });
+            document.getElementById('data-loader-overlay').classList.add('hidden');
+            renderActiveRun();
+        }
+
+        async function loadSidecarAndBoot() {
+            const statusEl = document.getElementById('loader-status');
+            const pickerEl = document.getElementById('loader-picker');
+            const fileInput = document.getElementById('sidecar-file-input');
+
+            fileInput.addEventListener('change', async function(e) {
+                const file = e.target.files && e.target.files[0];
+                if (!file) return;
+                statusEl.textContent = `Decompressing \${file.name}...`;
+                try {
+                    const runsObj = await decodeZlibJson(file.stream());
+                    bootWithRuns(runsObj);
+                } catch (err) {
+                    statusEl.textContent = `Failed to decode \${file.name}: \${err.message}`;
+                }
+            });
+
+            try {
+                const resp = await fetch(`./\${SIDECAR_FILE}`);
+                if (!resp.ok) {
+                    throw new Error(`HTTP \${resp.status}`);
+                }
+                statusEl.textContent = `Decompressing \${SIDECAR_FILE}...`;
+                const runsObj = await decodeZlibJson(resp.body);
+                bootWithRuns(runsObj);
+            } catch (err) {
+                statusEl.textContent =
+                    `Automatic fetch of \${SIDECAR_FILE} was blocked or unavailable (\${err.message}). ` +
+                    `Serve this folder over HTTP/HTTPS (e.g. GitHub Pages or a local server), ` +
+                    `or select \${SIDECAR_FILE} directly below.`;
+                pickerEl.style.display = "block";
+            }
+        }
+
+        loadSidecarAndBoot();
     </script>
 </body>
 </html>
 """
 
     write(output_path, html_content)
-    println("Exported multi-layer interactive dashboard to $(output_path)")
+    raw_mb = round(length(raw_bytes) / 1.0e6; digits = 2)
+    cmp_mb = round(length(compressed_bytes) / 1.0e6; digits = 2)
+    println(
+        "Exported multi-layer interactive dashboard to $(output_path) " *
+        "(sidecar: $(sidecar_path), $(cmp_mb) MB compressed from $(raw_mb) MB)"
+    )
     return output_path
 end
 

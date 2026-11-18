@@ -9,12 +9,12 @@
 #
 #  What the store provides (written by `TethysFlow.attach_output_callback!`):
 #
-#      hydrodynamics.zarr/          a GeoDataset
+#      hydrodynamics.zarr/          a TethysDataset
 #        .zattrs                    title, created_utc, and the seabed the run immersed
 #        lon, lat, depth, time      coordinate arrays, in the dataset's own `coords`
 #        T, u, v, w                 fields, each (lon, lat, depth, time)
 #
-#  Reading it is `Tethys.geoload(store)`. That is the whole point of the store being a Tethys
+#  Reading it is `Tethys.load_dataset(store)`. That is the whole point of the store being a Tethys
 #  store: an earlier writer put each interval in its own directory (`T/0`, `T/1`), which Tethys's
 #  Zarr reader cannot open -- it discovers variables as the root group's child arrays -- so every
 #  consumer walked Zarr itself. This did. Now it does not.
@@ -29,7 +29,7 @@
 # ==============================================================================
 
 using Tethys
-using Tethys: GeoDataset
+using Tethys: TethysDataset
 
 """
     _store_path(location) -> String
@@ -55,10 +55,10 @@ The time of each written interval, in order, from the store's own `time` coordin
 
 One axis for the whole store is deliberate: a per-field copy could drift, and a field read at
 its own recorded time but indexed by a shared time axis is a silent mismatch. The coordinate
-is read here from a `geoload`ed dataset, so it is the same axis the ocean half wrote.
+is read here from a dataset opened with `load_dataset`, so it is the same axis the ocean half wrote.
 """
 function _read_times(store::AbstractString)
-    ds = _geoload(store)
+    ds = _load_hydrodynamic_dataset(store)
     haskey(ds.coords, :time) || error(
         "The store at $(store) has no `time` coordinate, so the times of its intervals are " *
         "unknown. A field with no time is not a simulation output.")
@@ -79,7 +79,7 @@ fewer than three axes errors naming which, rather than defaulting to a spanned r
 defaulting would put every value in a track at the wrong place.
 """
 function _read_axes(store::AbstractString)
-    ds = _geoload(store)
+    ds = _load_hydrodynamic_dataset(store)
     out = (lon = nothing, lat = nothing, depth = nothing)
     for (k, name) in ((:lon, "longitude"), (:lat, "latitude"), (:depth, "depth"))
         haskey(ds.dims, k) || haskey(ds.dims, Symbol(name)) || error(
@@ -99,19 +99,19 @@ Which fields the store carries. A reader that asked for a field the store does n
 otherwise return zeros and call it a velocity.
 """
 function hydrodynamic_variables(store::AbstractString)
-    return sort!(collect(keys(_geoload(store).variables)))
+    return sort!(collect(keys(_load_hydrodynamic_dataset(store).variables)))
 end
 
 """
-    _geoload(store) -> GeoDataset
+    _load_hydrodynamic_dataset(store) -> TethysDataset
 
 The store as a Tethys dataset, opened through Tethys.
 
 An empty variable set is an error here rather than at the first read: it is what a store that
-is not Tethys's shape produces -- `geoload` succeeds and finds nothing -- and the failure used
-to surface three call sites later as "does not carry T", naming the wrong layer.
+is not Tethys's shape produces -- `load_dataset` succeeds and finds nothing -- and the failure
+used to surface three call sites later as "does not carry T", naming the wrong layer.
 """
-function _geoload(store::AbstractString)
+function _load_hydrodynamic_dataset(store::AbstractString)
     ds = Tethys.load_dataset(_store_path(store); backend = :zarr)
     isempty(ds.variables) && error(
         "The store at $(store) opens as a Tethys dataset with no variables. Either it is " *
@@ -135,8 +135,8 @@ consumer hold a long run without holding it in memory.
 """
 function open_hydrodynamics(location::AbstractString; fields = nothing)
     store = _store_path(location)
-    ds = _geoload(store)
-    times = collect(Float64, ds.coords[:time].data)
+    ds = _load_hydrodynamic_dataset(store)
+    times = _read_times(store)
     axes = _read_axes(store)
     available = sort!(collect(keys(ds.variables)))
 
@@ -164,7 +164,7 @@ struct HydrodynamicStore
     times::Vector{Float64}
     axes::@NamedTuple{lon::Vector{Float64}, lat::Vector{Float64},
                       depth::Vector{Float64}}
-    dataset::GeoDataset
+    dataset::TethysDataset
 end
 
 """
@@ -226,41 +226,35 @@ function create_flow_interpolator(location::AbstractString;
 
     # The trilinear weights are the same for every field, so they are computed once per call
     # rather than once per field per step.
-    _weight(vals, v) = begin
-        i = something(findfirst(x -> x > v, vals), length(vals))
-        i = clamp(i, 2, max(2, length(vals)))
-        return (i, clamp((v - vals[i-1]) / (vals[i] - vals[i-1]), 0.0, 1.0))
-    end
-    _weight_single(vals, v) = begin
-        (i, s) = _weight(vals, v)
-        return (i, s)
-    end
-    _time_weight(v) = begin
-        i = clamp(something(findfirst(x -> x > v, t), nt), 2, max(2, nt))
-        θ = clamp((v - t[i-1]) / (t[i] - t[i-1]), 0.0, 1.0)
-        return (i, θ)
+    _bracket(vals, v) = begin
+        n = length(vals)
+        n <= 1 && return (1, 1, 0.0)
+        i = clamp(something(findfirst(x -> x > v, vals), n), 2, n)
+        denom = vals[i] - vals[i - 1]
+        s = denom == 0.0 ? 0.0 : clamp((v - vals[i - 1]) / denom, 0.0, 1.0)
+        return (i - 1, i, s)
     end
 
     return function flow_interpolator(lon_q::Real, lat_q::Real, z_q::Real, t_q::Real)
-        i, sx = _weight(lon, Float64(lon_q))
-        j, sy = _weight(lat, Float64(lat_q))
-        k, sz = _weight(z, Float64(z_q))
-        m, θ = _time_weight(Float64(t_q))
+        i0, i1, sx = _bracket(lon, Float64(lon_q))
+        j0, j1, sy = _bracket(lat, Float64(lat_q))
+        k0, k1, sz = _bracket(z, Float64(z_q))
+        m0, m1, θ = _bracket(t, Float64(t_q))
 
         function sample(name)
             arr = data[name]
-            v0 = arr[m-1]; v1 = arr[m]
+            v0 = arr[m0]; v1 = arr[m1]
             a = 0.0
             for (ar, wf) in ((v0, 1.0 - θ), (v1, θ))
                 a += wf * (
-                    (1 - sx) * (1 - sy) * (1 - sz) * ar[i-1, j-1, k-1] +
-                    sx       * (1 - sy) * (1 - sz) * ar[i,   j-1, k-1] +
-                    (1 - sx) * sy       * (1 - sz) * ar[i-1, j,   k-1] +
-                    sx       * sy       * (1 - sz) * ar[i,   j,   k-1] +
-                    (1 - sx) * (1 - sy) * sz       * ar[i-1, j-1, k  ] +
-                    sx       * (1 - sy) * sz       * ar[i,   j-1, k  ] +
-                    (1 - sx) * sy       * sz       * ar[i-1, j,   k  ] +
-                    sx       * sy       * sz       * ar[i,   j,   k  ])
+                    (1 - sx) * (1 - sy) * (1 - sz) * ar[i0, j0, k0] +
+                    sx       * (1 - sy) * (1 - sz) * ar[i1, j0, k0] +
+                    (1 - sx) * sy       * (1 - sz) * ar[i0, j1, k0] +
+                    sx       * sy       * (1 - sz) * ar[i1, j1, k0] +
+                    (1 - sx) * (1 - sy) * sz       * ar[i0, j0, k1] +
+                    sx       * (1 - sy) * sz       * ar[i1, j0, k1] +
+                    (1 - sx) * sy       * sz       * ar[i0, j1, k1] +
+                    sx       * sy       * sz       * ar[i1, j1, k1])
             end
             return a
         end
@@ -275,6 +269,28 @@ end
 The location a consumer is handed. A path, and nothing else.
 """
 store_location(location::AbstractString) = abspath(location)
+
+"""
+    _parse_bottom_height(attrs, nx::Int, ny::Int) -> Matrix{Float64}
+
+Parse `bottom_height` from `.zattrs`, handling both 2D nested JSON arrays and
+1D flattened column-major vectors paired with `bottom_height_shape`.
+"""
+function _parse_bottom_height(attrs, nx::Int, ny::Int)::Matrix{Float64}
+    raw = attrs["bottom_height"]
+    if !isempty(raw) && first(raw) isa AbstractVector
+        return Float64.(reduce(hcat, raw))
+    end
+    vec_bh = Float64.(collect(raw))
+    if haskey(attrs, "bottom_height_shape") && length(attrs["bottom_height_shape"]) == 2
+        shp = (Int(attrs["bottom_height_shape"][1]), Int(attrs["bottom_height_shape"][2]))
+        if length(vec_bh) == prod(shp)
+            return reshape(vec_bh, shp)
+        end
+    end
+    length(vec_bh) == nx * ny && return reshape(vec_bh, nx, ny)
+    return reshape(vec_bh, 1, :)
+end
 
 """
     extract_hydrodynamic_dataset(location::AbstractString; time_index::Int = 1, time_seconds::Union{Nothing, Real} = nothing,
@@ -302,6 +318,8 @@ import each other; each defines its own reader for the store that TethysFlow wri
 A NamedTuple with fields matching TethysFlow's `extract_hydrodynamic_dataset` output,
 so figure families can consume either package's store reader interchangeably.
 """
+extract_hydrodynamic_dataset(hydro::NamedTuple; kwargs...) = hydro
+
 function extract_hydrodynamic_dataset(location::AbstractString;
                                        time_index::Union{Nothing, Int} = nothing,
                                        time_seconds::Union{Nothing, Real} = nothing,
@@ -355,24 +373,43 @@ function extract_hydrodynamic_dataset(location::AbstractString;
     g = 9.81      # m/s²
     alpha = 1.7e-4 # K⁻¹ thermal expansion coefficient
     nz = length(depths)
-    stratification = similar(T)
-    for k in 1:nz
-        if k == 1
-            dT_dz = (T[:, :, 2] - T[:, :, 1]) / (depths[2] - depths[1])
-        elseif k == nz
-            dT_dz = (T[:, :, nz] - T[:, :, nz - 1]) / (depths[nz] - depths[nz - 1])
-        else
-            dT_dz = (T[:, :, k + 1] - T[:, :, k - 1]) / (depths[k + 1] - depths[k - 1])
+    stratification = zeros(Float64, size(T))
+    if nz >= 2
+        for k in 1:nz
+            if k == 1
+                dT_dz = (T[:, :, 2] - T[:, :, 1]) / (depths[2] - depths[1])
+            elseif k == nz
+                dT_dz = (T[:, :, nz] - T[:, :, nz - 1]) / (depths[nz] - depths[nz - 1])
+            else
+                dT_dz = (T[:, :, k + 1] - T[:, :, k - 1]) / (depths[k + 1] - depths[k - 1])
+            end
+            stratification[:, :, k] = g * alpha .* dT_dz
         end
-        stratification[:, :, k] = g * alpha .* dT_dz
     end
 
-    # Bathymetry from the store if available, else negative constant (wet shelf)
-    bathy = if "bathymetry" in available || "depth" in available
+    # Bathymetry from .zattrs bottom_height, or 2D store variable if available, else wet shelf
+    zattrs_path = joinpath(store.location, ".zattrs")
+    bathy = nothing
+    if isfile(zattrs_path)
+        attrs = JSON3.read(read(zattrs_path, String))
+        if haskey(attrs, "bottom_height")
+            bh = _parse_bottom_height(attrs, length(lons), length(lats))
+            if size(bh) == (length(lons), length(lats))
+                bathy = bh
+            end
+        end
+    end
+    if isnothing(bathy) && ("bathymetry" in available || "depth" in available)
         name = "bathymetry" in available ? "bathymetry" : "depth"
-        variable(store, name, 1)
-    else
-        fill(-100.0, length(lons), length(lats))
+        v_bathy = store.dataset.variables[name]
+        if ndims(v_bathy.data) == 2
+            bathy = Array{Float64}(v_bathy.data)
+        elseif ndims(v_bathy.data) >= 3
+            bathy = Array{Float64}(v_bathy.data[:, :, 1])
+        end
+    end
+    if isnothing(bathy)
+        bathy = fill(-100.0, length(lons), length(lats))
     end
 
     return (

@@ -118,6 +118,9 @@ function validate_config_sections(cfg::AbstractDict, origin::AbstractString = ""
     return nothing
 end
 
+const OCEAN_CONFIG   = "ocean.toml"
+const BIOLOGY_CONFIG = "biology.toml"
+
 """
     find_domain_config_paths(dir::AbstractString = ".") -> Union{Nothing, NamedTuple}
 

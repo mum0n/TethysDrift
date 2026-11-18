@@ -607,7 +607,7 @@ end
     CoupledSimulationConfig
 
 Unified configuration aggregating physical `HydrodynamicConfig` and biological
-`LarvalDispersalConfig` for integrated end-to-end simulations.
+`LarvalDispersalConfig` for coupled simulations.
 """
 struct CoupledSimulationConfig
     hydro  :: HydrodynamicConfig

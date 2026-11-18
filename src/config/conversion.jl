@@ -305,9 +305,8 @@ function configuration_to_options(config_dict::AbstractDict;
      # unqualified fallback used to look and where no ocean store has ever been.
      hydro_file = String(get_val("storage", "ocean_model",
                           get_val("hydrodynamics", "hydro_model_file",
-                              let p = Tethys.lakehouse_dir("TethysFlow", _config_stem)
-                                  isdir(p) ? p : Tethys.lakehouse_dir("TethysFlow", _config_stem)
-                              end)))
+                              joinpath(Tethys.lakehouse_dir("TethysFlow", _config_stem),
+                                       "hydrodynamics.zarr"))))
      hydro_only = Bool(get_val("hydrodynamics", "hydro_only", false))
      track_only = Bool(get_val("hydrodynamics", "track_only", false))
     reuse_hydro = Bool(get_val("hydrodynamics", "reuse_hydro", false))
@@ -381,7 +380,8 @@ function configuration_to_options(config_dict::AbstractDict;
         isfile(dst) || cp(src, dst, force = true)
         v_file = dst
     end
-    atmo_src = Symbol(lowercase(String(get_val("atmosphere", "forcing", "era5_climatology"))))
+    atmo_src = Symbol(lowercase(String(get_val("atmosphere", "source",
+                                               get_val("atmosphere", "forcing", "era5_climatology")))))
     obc_src_val = get_val("boundaries", "ocean_boundary_source", nothing)
     if isnothing(obc_src_val)
         obc_src_val = get_val("boundaries", "parent_ocean", "glorys12v1")
@@ -544,7 +544,8 @@ function options_to_configuration(opts::HydrodynamicOptions)::Dict{String, Any}
             "depths" => opts.vertical_depths
         ),
         "atmosphere" => Dict{String, Any}(
-            "source" => string(opts.atmospheric_source)
+            "source" => string(opts.atmospheric_source),
+            "bulk_heat_flux" => opts.bulk_heat_flux
         ),
         "boundaries" => Dict{String, Any}(
             "ocean_boundary_source" => string(opts.ocean_boundary_source),
@@ -606,7 +607,15 @@ function options_to_configuration(opts::HydrodynamicOptions)::Dict{String, Any}
             "cv_settlement" => opts.cv_settlement
         ),
         "dvm" => Dict{String, Any}(
-            "enable_dvm" => opts.enable_dvm
+            "enable_dvm" => opts.enable_dvm,
+            "zoea1_day_depth" => opts.zoea1_day_depth,
+            "zoea1_night_depth" => opts.zoea1_night_depth,
+            "zoea2_day_depth" => opts.zoea2_day_depth,
+            "zoea2_night_depth" => opts.zoea2_night_depth,
+            "megalopa_day_depth" => opts.megalopa_day_depth,
+            "megalopa_night_depth" => opts.megalopa_night_depth,
+            "zoea2_depth_factor" => opts.zoea2_depth_factor,
+            "megalopa_swim_factor" => opts.megalopa_swim_factor
         ),
         "molting_and_settlement" => Dict{String, Any}(
             "enable_molting" => opts.enable_molting,
@@ -624,13 +633,12 @@ function options_to_configuration(opts::HydrodynamicOptions)::Dict{String, Any}
             "larval_max_intermolt_days" => opts.larval_max_intermolt_days,
             "settlement_min_depth" => opts.settlement_min_depth,
             "settlement_max_depth" => opts.settlement_max_depth,
-            "settlement_max_temp" => opts.settlement_max_temp,
-            "cv_molt" => opts.cv_molt,
-            "cv_mortality" => opts.cv_mortality
+            "settlement_max_temp" => opts.settlement_max_temp
         ),
         "storage" => Dict{String, Any}(
             "output_dir" => opts.output_dir,
             "ocean_model" => opts.hydro_model_file,
+            "storage_backend" => opts.storage_backend,
             "enable_zarr" => opts.enable_zarr,
             "zarr_path" => opts.zarr_path,
             "run_id" => opts.run_id,
@@ -674,6 +682,8 @@ function to_hydrodynamic_config(opts::HydrodynamicOptions; kwargs...)::Hydrodyna
         :domain_z                 => opts.domain_z,
         :grid_size                => opts.grid_size,
         :vertical_stretching_mode => opts.vertical_stretching_mode,
+        :nz_above                 => opts.nz_above,
+        :vertical_break_depth     => opts.vertical_break_depth,
         :vertical_grid_file       => opts.vertical_grid_file,
         :vertical_depths          => opts.vertical_depths,
         :bathymetry_source        => Symbol(opts.bathy_source),
@@ -727,26 +737,31 @@ function to_hydrodynamic_config(opts::HydrodynamicOptions; kwargs...)::Hydrodyna
 
     return HydrodynamicConfig(
         d[:domain_lon], d[:domain_lat], d[:domain_z], d[:grid_size],
-        Symbol(d[:vertical_stretching_mode]),         String(d[:vertical_grid_file]),
+        Symbol(d[:vertical_stretching_mode]),
+        Int(d[:nz_above]), Float64(d[:vertical_break_depth]),
+        String(d[:vertical_grid_file]),
         Float64[Float64(x) for x in d[:vertical_depths]],
         Symbol(d[:bathymetry_source]),
-        String(d[:bathy_source]), String(d[:coastline_source]), String(d[:wind_source]), String(d[:wind_time_iso]), Float64(d[:inshore_depth]),
-        Float64(d[:shelf_slope]), Symbol(d[:atmospheric_source]),
-        Symbol(d[:drag_formulation]), Bool(d[:bulk_heat_flux]),
-        Bool(d[:climatology]),
+        String(d[:bathy_source]), String(d[:coastline_source]),
+        String(d[:wind_source]), String(d[:wind_time_iso]),
+        Float64(d[:inshore_depth]), Float64(d[:shelf_slope]),
+        Symbol(d[:atmospheric_source]), Symbol(d[:drag_formulation]),
+        Bool(d[:bulk_heat_flux]), Bool(d[:climatology]),
         Symbol(d[:ocean_boundary_source]), Symbol(d[:obc_type]),
         Float64(d[:sponge_layer_width]), Float64(d[:sponge_timescale]),
-        Float64(d[:bottom_drag]), Symbol(d[:bbl_mixing_closure]),
+        Float64(d[:cd_drag]), Float64(d[:bottom_drag]),
+        Symbol(d[:bbl_mixing_closure]),
         Float64(d[:sim_duration_seconds]), Float64(d[:sim_dt_seconds]),
         Bool(d[:adaptive_cfl]), Float64(d[:target_cfl]),
         Float64(d[:target_wave_cfl]), Float64(d[:max_dt_seconds]),
         Float64(d[:min_dt_seconds]), Float64(d[:coriolis_latitude]),
-         Float64(d[:divergence_limit]), String(d[:output_path]),
-         String(d[:storage_backend]), Float64(d[:output_schedule_seconds]),
-         Bool(d[:enable_checkpoint]), String(d[:checkpoint_prefix]),
-         String(d[:checkpoint_schedule]), String(d[:checkpoint_dir]),
-         Bool(d[:checkpoint_cleanup]), Bool(d[:auto_restart]),
-         Bool(d[:use_gpu]), Bool(d[:fallback_to_cpu])
+        Float64(d[:divergence_limit]), String(d[:output_path]),
+        Float64(d[:output_schedule_seconds]),
+        Bool(d[:enable_checkpoint]), String(d[:checkpoint_prefix]),
+        Float64(d[:checkpoint_schedule]), String(d[:checkpoint_dir]),
+        Bool(d[:checkpoint_cleanup]), Bool(d[:auto_restart]),
+        Bool(d[:use_gpu]), Bool(d[:fallback_to_cpu]),
+        String(d[:storage_backend])
     )
 end
 
@@ -826,8 +841,8 @@ function to_larval_config(opts::HydrodynamicOptions; kwargs...)::LarvalDispersal
         Float64(d[:larval_overage_hazard]), Float64(d[:larval_max_intermolt_days]),
         Float64(d[:settlement_min_depth]), Float64(d[:settlement_max_depth]),
         Float64(d[:settlement_max_temp]), Bool(d[:settlement_stochastic]),
-         Float64(d[:cv_molt]), Float64(d[:cv_mortality]), Float64(d[:cv_settlement]),
-         Bool(d[:enable_checkpoint]), String(d[:output_path]),
-         String(d[:storage_backend]), Int(d[:seed])
+        Float64(d[:cv_molt]), Float64(d[:cv_mortality]), Float64(d[:cv_settlement]),
+        Bool(d[:enable_zarr]), String(d[:zarr_path]),
+        String(d[:run_id]), Int(d[:seed])
      )
 end

@@ -86,31 +86,30 @@ function build_flow_from_store(store::HydrodynamicStore;
     data = Dict{String, Vector{Array{Float64, 3}}}(
         n => [variable(store, n, k) for k in keep] for n in fields)
 
-    _weight(vals, v) = begin
-        i = something(findfirst(x -> x > v, vals), length(vals))
-        i = clamp(i, 2, max(2, length(vals)))
-        return (i, clamp((v - vals[i-1]) / (vals[i] - vals[i-1]), 0.0, 1.0))
-    end
-    _tw(v) = begin
-        m = clamp(something(findfirst(x -> x > v, tsel), length(tsel)), 2, max(2, length(tsel)))
-        return (m, clamp((v - tsel[m-1]) / (tsel[m] - tsel[m-1]), 0.0, 1.0))
+    _bracket(vals, v) = begin
+        n = length(vals)
+        n <= 1 && return (1, 1, 0.0)
+        i = clamp(something(findfirst(x -> x > v, vals), n), 2, n)
+        denom = vals[i] - vals[i - 1]
+        s = denom == 0.0 ? 0.0 : clamp((v - vals[i - 1]) / denom, 0.0, 1.0)
+        return (i - 1, i, s)
     end
 
     span[1] = tsel[1]; span[2] = tsel[end]
     return function flow_interpolator(lon_q::Real, lat_q::Real, z_q::Real, t_q::Real)
-        i, sx = _weight(lon, Float64(lon_q))
-        j, sy = _weight(lat, Float64(lat_q))
-        k, sz = _weight(z, Float64(z_q))
-        m, θ = _tw(Float64(t_q))
+        i0, i1, sx = _bracket(lon, Float64(lon_q))
+        j0, j1, sy = _bracket(lat, Float64(lat_q))
+        k0, k1, sz = _bracket(z, Float64(z_q))
+        m0, m1, θ = _bracket(tsel, Float64(t_q))
         sample(name) = begin
             arr = data[name]
             a = 0.0
-            for (ar, wf) in ((arr[m-1], 1.0 - θ), (arr[m], θ))
+            for (ar, wf) in ((arr[m0], 1.0 - θ), (arr[m1], θ))
                 a += wf * (
-                    (1-sx)*(1-sy)*(1-sz)*ar[i-1,j-1,k-1] + sx*(1-sy)*(1-sz)*ar[i,j-1,k-1] +
-                    (1-sx)*sy*(1-sz)*ar[i-1,j,k-1]     + sx*sy*(1-sz)*ar[i,j,k-1] +
-                    (1-sx)*(1-sy)*sz*ar[i-1,j-1,k]     + sx*(1-sy)*sz*ar[i,j-1,k] +
-                    (1-sx)*sy*sz*ar[i-1,j,k]           + sx*sy*sz*ar[i,j,k])
+                    (1-sx)*(1-sy)*(1-sz)*ar[i0,j0,k0] + sx*(1-sy)*(1-sz)*ar[i1,j0,k0] +
+                    (1-sx)*sy*(1-sz)*ar[i0,j1,k0]     + sx*sy*(1-sz)*ar[i1,j1,k0] +
+                    (1-sx)*(1-sy)*sz*ar[i0,j0,k1]     + sx*(1-sy)*sz*ar[i1,j0,k1] +
+                    (1-sx)*sy*sz*ar[i0,j1,k1]         + sx*sy*sz*ar[i1,j1,k1])
             end
             return a
         end
@@ -147,10 +146,12 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
     # When overwrite is requested, purge existing trajectory checkpoints and Zarr store
     if opts.overwrite
         tag = !isempty(opts.run_id) ? "_$(opts.run_id)" : ""
-        tagged_cp = joinpath(opts.output_dir, "larval_trajectories$(tag).jld2")
-        default_cp = joinpath(opts.output_dir, "larval_trajectories.jld2")
-        isfile(tagged_cp) && rm(tagged_cp; force = true)
-        isfile(default_cp) && rm(default_cp; force = true)
+        for ext in (".zarr", ".jld2")
+            tagged_cp = joinpath(opts.output_dir, "larval_trajectories$(tag)$(ext)")
+            default_cp = joinpath(opts.output_dir, "larval_trajectories$(ext)")
+            ispath(tagged_cp) && rm(tagged_cp; recursive = true, force = true)
+            ispath(default_cp) && rm(default_cp; recursive = true, force = true)
+        end
         println("Flag --overwrite active: purged existing trajectory checkpoints in $(opts.output_dir)")
     end
 
@@ -180,14 +181,14 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
     elseif !isnothing(store)
         (extrema(store.axes.lon), extrema(store.axes.lat))
     else
-        expand_domain_with_buffer(opts.domain_lon, opts.domain_lat, buffer_km = opts.buffer_km)
+        Tethys.expand_domain_with_buffer(opts.domain_lon, opts.domain_lat, buffer_km = opts.buffer_km)
     end
 
     # Seabed bathymetric elevation. Built *before* anything uses it, because this used to be
     # built a hundred lines further down and read here: an assignment later in the body does
     # not make the name exist earlier, so the spawn died on an undefined variable -- and the
     # only way to see that was to run the driver. Resolved from the run's source and range
-    # through `GeoDataSources`, so the seeded larvae sit on the same sea floor the model was
+    # through `Tethys`, so the seeded larvae sit on the same sea floor the model was
     # built on.
     run_bathy = _larval_bathymetry(opts, store)
     bathy_field_fn = get_bathymetry_interpolator(
@@ -304,8 +305,11 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
 
     # Seabed bathymetric elevation. Built above, at the point of first use, so the spawn and
     # the advection sit on the same sea floor.
-    coastline_path = joinpath(opts.input_dir, "coastline.dat")
-    coast_polys = isfile(coastline_path) ? load_coastline_polygons(coastline_path) : nothing
+    coastline_path = joinpath(opts.input_dir, "coastline.parquet")
+    coast_polys = isfile(coastline_path) ? Tethys.load_coastline_polygons(coastline_path) : nothing
+    if !isnothing(coast_polys) && isempty(coast_polys)
+        coast_polys = nothing
+    end
 
     # Track over the full span of the hydrodynamic record. The cohort stops early by itself once
     # every larva is dead or settled, so this is an upper bound the run only reaches if larvae
@@ -370,38 +374,46 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
         rng = rng
     )
 
-    # Save trajectories to JLD2 checkpoint for modular reloading
+    # Save trajectories to Zarr checkpoint for modular reloading
     mkpath(opts.output_dir)
     tag = !isempty(opts.run_id) ? "_$(opts.run_id)" : ""
-    track_checkpoint = joinpath(opts.output_dir, "larval_trajectories$(tag).jld2")
-    jldsave(
-        track_checkpoint;
-        lons = trajectories.lons,
-        lats = trajectories.lats,
-        depths = trajectories.depths,
-        temperatures = hasproperty(trajectories, :temperatures) ? trajectories.temperatures : nothing,
-        degree_days = trajectories.degree_days,
-        degree_days_timeseries = hasproperty(trajectories, :degree_days_timeseries) ? trajectories.degree_days_timeseries : nothing,
-        survival_probability = hasproperty(trajectories, :survival_probability) ? trajectories.survival_probability : nothing,
-        stage_survival = hasproperty(trajectories, :stage_survival) ? trajectories.stage_survival : nothing,
-        stages = trajectories.stages,
-        alive = trajectories.alive,
-        settlement_status = trajectories.settlement_status,
-        settlement_age = trajectories.settlement_age,
-        ascent_duration = hasproperty(trajectories, :ascent_duration) ? trajectories.ascent_duration : nothing,
+    track_checkpoint = joinpath(opts.output_dir, "larval_trajectories$(tag).zarr")
+    _to_f32(x) = isnothing(x) ? nothing : (x isa AbstractArray{Float64} ? Float32.(x) : x)
+    cp_payload = Dict{String, Any}(
+        "lons" => _to_f32(trajectories.lons),
+        "lats" => _to_f32(trajectories.lats),
+        "depths" => _to_f32(trajectories.depths),
+        "temperatures" => hasproperty(trajectories, :temperatures) ? _to_f32(trajectories.temperatures) : nothing,
+        "degree_days" => _to_f32(trajectories.degree_days),
+        "degree_days_timeseries" => hasproperty(trajectories, :degree_days_timeseries) ? _to_f32(trajectories.degree_days_timeseries) : nothing,
+        "survival_probability" => hasproperty(trajectories, :survival_probability) ? _to_f32(trajectories.survival_probability) : nothing,
+        "stage_survival" => hasproperty(trajectories, :stage_survival) ? _to_f32(trajectories.stage_survival) : nothing,
+        "stages" => trajectories.stages,
+        "alive" => trajectories.alive,
+        "settlement_status" => trajectories.settlement_status,
+        "settlement_age" => _to_f32(trajectories.settlement_age),
+        "ascent_duration" => hasproperty(trajectories, :ascent_duration) ? _to_f32(trajectories.ascent_duration) : nothing,
         # The cohort-level stage diagnostics are saved too, so `--viz` can redraw the
-        # progression figures from a checkpoint without re-running Segment 6.
-        cohort_molt_fraction = hasproperty(trajectories, :cohort_molt_fraction) ? trajectories.cohort_molt_fraction : nothing,
-        molt_schedule = hasproperty(trajectories, :molt_schedule) ? trajectories.molt_schedule : nothing,
-        times = trajectories.times,
-        ids = trajectories.ids
+        # progression figures from a checkpoint without re-running Segment 6. `molt_schedule`
+        # is a tuple of `MoltCDF` structs and is reconstructed deterministically from `opts`
+        # by `_complete_stage_diagnostics`.
+        "cohort_molt_fraction" => hasproperty(trajectories, :cohort_molt_fraction) ? _to_f32(trajectories.cohort_molt_fraction) : nothing,
+        "molt_schedule" => nothing,
+        "times" => trajectories.times,
+        "ids" => trajectories.ids,
     )
+    tmp_checkpoint = track_checkpoint * ".tmp"
+    ispath(tmp_checkpoint) && rm(tmp_checkpoint; recursive = true, force = true)
+    Tethys.write_data(tmp_checkpoint, cp_payload; backend = :zarr, overwrite = true)
+    ispath(track_checkpoint) && rm(track_checkpoint; recursive = true, force = true)
+    mv(tmp_checkpoint, track_checkpoint; force = true)
 
     # Maintain default checkpoint as fallback when custom run_id is supplied
     if !isempty(strip(opts.run_id))
-        default_cp = joinpath(opts.output_dir, "larval_trajectories.jld2")
+        default_cp = joinpath(opts.output_dir, "larval_trajectories.zarr")
         try
-            cp(track_checkpoint, default_cp, force = true)
+            isdir(default_cp) && rm(default_cp; recursive = true, force = true)
+            cp(track_checkpoint, default_cp; force = true)
         catch
         end
     end
@@ -450,7 +462,7 @@ end
 
 Compute gridded larval retention and recruitment metrics, thermal exposure indices,
 empirical Lagrangian drift velocities and effective diffusivities, regional
-connectivity matrices across Crab Fishing Areas (CFAs), and export multi-layer NetCDF and JLD2.
+connectivity matrices across Crab Fishing Areas (CFAs), and export multi-layer NetCDF and Zarr.
 
 # Inputs
 - `opts::HydrodynamicOptions`: Workflow options.
@@ -511,12 +523,12 @@ function run_segment_metrics(;
         println("  $(rpad(conn.strata_names[i], 28)) -> [$(row_str)]")
     end
 
-    # 5. Export comprehensive multi-variable NetCDF and JLD2 archives
+    # 5. Export multi-variable NetCDF4 and Zarr archives
     nc_export_path = joinpath(opts.output_dir, "larval_dispersal_analysis.nc")
-    jld_export_path = joinpath(opts.output_dir, "larval_dispersal_analysis.jld2")
+    jld_export_path = joinpath(opts.output_dir, "larval_dispersal_analysis.zarr")
     active_config = options_to_configuration(opts)
 
-    println("Exporting multi-layer NetCDF archive -> $(nc_export_path)...")
+    println("Exporting multi-layer NetCDF4 archive -> $(nc_export_path)...")
     export_larval_dispersal_netcdf(
         nc_export_path,
         trajectories = target_trajs,
@@ -526,7 +538,7 @@ function run_segment_metrics(;
         config = active_config
     )
 
-    println("Exporting comprehensive JLD2 archive -> $(jld_export_path)...")
+    println("Exporting Zarr archive -> $(jld_export_path)...")
     export_larval_dispersal_jld2(
         jld_export_path,
         trajectories = target_trajs,
@@ -555,7 +567,8 @@ function run_segment_metrics(;
                         mean_degree_days = let vals = filter(!isnan, vec(therm_metrics.mean_degree_days))
                             isempty(vals) ? 0.0 : Statistics.mean(vals)
                         end,
-                        settlement_success_rate = Float64(rec_metrics.success_rate[1]) # or aggregate
+                        settlement_success_rate = count(==(:settled_successful), target_trajs.settlement_status) /
+                            max(1, length(target_trajs.settlement_status))
                     ),
                     connectivity = conn,
                     gridded_dispersal = (
@@ -620,17 +633,7 @@ function render_all_figures(; opts::HydrodynamicOptions = HydrodynamicOptions())
     println("\n=================================================================")
     println(" [Figures] Regenerating all figures and visuals")
     println("=================================================================")
-    viz = run_segment_visualize(opts = opts)
-    if opts.animate_hydro
-        anim_path = if !isempty(opts.hydro_model_file) && isfile(opts.hydro_model_file)
-            render_hydrodynamic_animation_if_requested(opts, opts.hydro_model_file)
-        else
-            println("  --animate-hydro set but no hydro model file available; skipping animation.")
-            nothing
-        end
-        return merge(viz, (animation = anim_path,))
-    end
-    return viz
+    return run_segment_visualize(opts = opts)
 end
 
 
@@ -651,7 +654,7 @@ _ck_or(saved, key::AbstractString, default) =
 """
     _trajectories_from_checkpoint(saved::Dict) -> NamedTuple
 
-Build the trajectory NamedTuple from a loaded `larval_trajectories*.jld2` dictionary.
+Build the trajectory NamedTuple from a loaded `larval_trajectories*.zarr` dictionary.
 
 Fields that older checkpoints lack are filled with the same placeholders used before
 (`temperatures` 4 °C, `degree_days_timeseries` 40 °C·d, `survival_probability` 0.95). The
@@ -671,9 +674,9 @@ function _trajectories_from_checkpoint(saved)
         degree_days_timeseries = _ck_or(saved, "degree_days_timeseries",
                                         fill(40.0, n_p, n_t)),
         survival_probability = _ck_or(saved, "survival_probability", fill(0.95, n_p, n_t)),
-        stages = saved["stages"],
-        alive = saved["alive"],
-        settlement_status = saved["settlement_status"],
+        stages = Symbol.(saved["stages"]),
+        alive = Bool.(saved["alive"]),
+        settlement_status = Symbol.(saved["settlement_status"]),
         settlement_age = _ck_or(saved, "settlement_age", fill(t_end, n_p)),
         stage_survival = _ck_or(saved, "stage_survival", fill(1.0, n_p)),
         ascent_duration = _ck_or(saved, "ascent_duration", fill(0.0, n_p)),
@@ -738,11 +741,11 @@ end
 Load the trajectory set of the configured run for Segments 7 and 8.
 
 Sources, in order:
-1. Analytical storage (`opts.zarr_path`, run id `run_identifier(opts)`). If the JLD2
+1. Analytical storage (`opts.zarr_path`, run id `run_identifier(opts)`). If the Zarr
    checkpoint describes the same cohort (equal `ids` and `times`), the checkpoint is used
    instead, because it also holds `stage_survival`, `ascent_duration` and the true
    `settlement_age`, none of which analytical storage stores.
-2. The JLD2 checkpoint `larval_trajectories[_<run_id>].jld2`.
+2. The Zarr checkpoint `larval_trajectories[_<run_id>].zarr`.
 3. Neither present: Segment 6 is run.
 
 The result is passed through [`_complete_stage_diagnostics`](@ref), so every source yields the
@@ -751,9 +754,9 @@ same set of stage fields.
 function load_run_trajectories(opts::HydrodynamicOptions)
     target_run_id = run_identifier(opts)
     tag = !isempty(strip(opts.run_id)) ? "_$(opts.run_id)" : ""
-    tagged_cp = joinpath(opts.output_dir, "larval_trajectories$(tag).jld2")
-    track_cp = isfile(tagged_cp) ? tagged_cp :
-               joinpath(opts.output_dir, "larval_trajectories.jld2")
+    tagged_cp = joinpath(opts.output_dir, "larval_trajectories$(tag).zarr")
+    track_cp = isdir(tagged_cp) ? tagged_cp :
+               joinpath(opts.output_dir, "larval_trajectories.zarr")
 
     from_db = nothing
     if !opts.overwrite && opts.enable_zarr && isdir(opts.zarr_path)
@@ -768,7 +771,24 @@ function load_run_trajectories(opts::HydrodynamicOptions)
         end
     end
 
-    from_cp = isfile(track_cp) ? _trajectories_from_checkpoint(JLD2.jldopen(track_cp, "r")) : nothing
+    from_cp = if isdir(track_cp)
+        try
+            raw_cp = Tethys.read_data(track_cp; backend = :zarr)
+            if haskey(raw_cp, "lons") && haskey(raw_cp, "lats") && haskey(raw_cp, "times")
+                _trajectories_from_checkpoint(raw_cp)
+            else
+                @warn "Checkpoint at $(track_cp) is incomplete (missing 'lons'/'lats'/'times'); removing and re-running Segment 6."
+                rm(track_cp; recursive = true, force = true)
+                nothing
+            end
+        catch err
+            @warn "Could not read checkpoint at $(track_cp) ($(sprint(showerror, err))); removing and re-running Segment 6."
+            rm(track_cp; recursive = true, force = true)
+            nothing
+        end
+    else
+        nothing
+    end
 
     trajs = if !isnothing(from_db) && !isnothing(from_cp) &&
                Int.(from_cp.ids) == Int.(from_db.ids) &&
@@ -820,11 +840,12 @@ function run_segment_visualize(;
 
  
 
-    # Bathymetry for the background contours. No store is open at this point -- the figures are
-    # redrawn from stored trajectories -- so this resolves through the data layer for the
-    # domain the run was configured with. See `_larval_bathymetry`: the contours and the grid
-    # agree about the sea floor rather than one being drawn from whatever file is present.
-    bathy_data = _larval_bathymetry(opts, nothing)
+    # Bathymetry for the background contours. Open the configured hydrodynamic store if
+    # present so `_larval_bathymetry` reads the store's own `bottom_height` relief first.
+    hydro_location = resolve_hydro_model_path(opts, "hydrodynamics.zarr")[1]
+    hydro_store = isdir(hydro_location) ?
+        (try open_hydrodynamics(hydro_location) catch; nothing end) : nothing
+    bathy_data = _larval_bathymetry(opts, hydro_store)
 
     lon_b = range(opts.domain_lon[1], opts.domain_lon[2], length = opts.grid_size[1])
     lat_b = range(opts.domain_lat[1], opts.domain_lat[2], length = opts.grid_size[2])
@@ -989,9 +1010,9 @@ function run_segment_visualize(;
              () -> plot_hydrodynamic_hovmoller(active_hydro; station = (st_lon, st_lat),
                                                variable = :temperature, output_path = fig_hov_path)),
             ("near-bed temperature map", fig_tbot_path,
-             () -> plot_bottom_temperature_map(active_hydro; output_path = fig_tbot_path)),
+             () -> plot_hydrodynamic_bottom_temperature(active_hydro; output_path = fig_tbot_path)),
             ("temperature-salinity diagram", fig_ts_diagram_path,
-             () -> plot_temperature_salinity_diagram(active_hydro; output_path = fig_ts_diagram_path))
+             () -> plot_hydrodynamic_ts_diagram(active_hydro; output_path = fig_ts_diagram_path))
             )
             println("Rendering $label -> $(path)...")
             try
@@ -1011,9 +1032,9 @@ function run_segment_visualize(;
         hydro_source = if !isnothing(active_hydro)
             active_hydro
         else
-            default_jld2 = "hydrodynamics.jld2"
-            resolved_jld2, _ = resolve_hydro_model_path(opts, default_jld2)
-            isfile(resolved_jld2) ? resolved_jld2 : nothing
+            default_store = "hydrodynamics.zarr"
+            resolved_store, _ = resolve_hydro_model_path(opts, default_store)
+            ispath(resolved_store) ? resolved_store : nothing
         end
 
         anim_file_path = if !isempty(strip(opts.anim_output_path))
@@ -1117,14 +1138,13 @@ function run_segment_visualize(;
         output_path = fig10_path
     )
 
-    # 10. Standalone Multi-Layer Interactive HTML5 Dashboard
+    # 10. Interactive HTML5 Dashboard (with zlib-compressed sidecar payload)
     html_path = joinpath(opts.output_dir, "interactive_larval_tracks.html")
     if opts.interactive_map
-        println("Rendering multi-layer interactive Leaflet dashboard with hydrodynamic fields -> $(html_path)...")
+        println("Rendering interactive Leaflet larval dispersal dashboard -> $(html_path)...")
         export_interactive_tracks_html(
             html_path;
             runs_data = runs_bundle,
-            hydrodynamics = active_hydro,
             strata_definitions = cfa_defs,
             title = "Scotian Shelf Snow Crab Larval Dispersal & Demographic Connectivity"
         )
@@ -1146,6 +1166,9 @@ function run_segment_visualize(;
         # Eulerian
         fig_hydro_advection = fig8_path,
         fig_hydro_tracers = fig9_path,
+        fig_hydro_stratification = fig_strat_path,
+        fig_hydro_diffusion = fig_diff_path,
+        fig_hydro_section = fig_sec_path,
         fig_hydro_timeseries = fig_ts_path,
         fig_hovmoller = fig_hov_path,
         fig_bottom_temperature = fig_tbot_path,
@@ -1286,48 +1309,6 @@ Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: im
 animate_hydrodynamic_field(args...; kwargs...) = error("`animate_hydrodynamic_field` is owned by TethysFlow, not by this package.")
 
 """
-    plot_hydrodynamic_advection(args...; kwargs...)
-
-Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
-"""
-plot_hydrodynamic_advection(args...; kwargs...) = error("`plot_hydrodynamic_advection` is owned by TethysFlow, not by this package.")
-
-"""
-    plot_hydrodynamic_diffusion(args...; kwargs...)
-
-Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
-"""
-plot_hydrodynamic_diffusion(args...; kwargs...) = error("`plot_hydrodynamic_diffusion` is owned by TethysFlow, not by this package.")
-
-"""
-    plot_hydrodynamic_section(args...; kwargs...)
-
-Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
-"""
-plot_hydrodynamic_section(args...; kwargs...) = error("`plot_hydrodynamic_section` is owned by TethysFlow, not by this package.")
-
-"""
-    plot_hydrodynamic_stratification(args...; kwargs...)
-
-Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
-"""
-plot_hydrodynamic_stratification(args...; kwargs...) = error("`plot_hydrodynamic_stratification` is owned by TethysFlow, not by this package.")
-
-"""
-    plot_hydrodynamic_timeseries(args...; kwargs...)
-
-Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
-"""
-plot_hydrodynamic_timeseries(args...; kwargs...) = error("`plot_hydrodynamic_timeseries` is owned by TethysFlow, not by this package.")
-
-"""
-    plot_hydrodynamic_tracers(args...; kwargs...)
-
-Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
-"""
-plot_hydrodynamic_tracers(args...; kwargs...) = error("`plot_hydrodynamic_tracers` is owned by TethysFlow, not by this package.")
-
-"""
     _larval_bathymetry(opts, store)
 
 The seabed `(lon, lat) -> z` the larvae sit on, resolved without calling the ocean half.
@@ -1338,7 +1319,7 @@ Order, and why each step is what it is:
    seabed it immersed *into* the store, so a larva released where the store says it is land is
    measured against the sea floor the flow was computed on. This is the coupling the two halves
    agreed on, and it is a path, not a package import.
-2. **The data layer**, for the store's own domain. `GeoDataSources` is shared by both halves and
+2. **The data layer**, for the store's own domain. `Tethys` is shared by both halves and
    is not the ocean half: it resolves a bathymetry product by coverage out of the central
    lakehouse. A store written before the seabed was carried in `.zattrs` has no step 1, and this
    is the alternative that answers with the same product the ocean run would have resolved.
@@ -1354,9 +1335,9 @@ function _larval_bathymetry(opts::HydrodynamicOptions, store)
         if isfile(zattrs)
             a = JSON3.read(read(zattrs, String))
             if haskey(a, "bottom_height") && haskey(store.axes, :lon)
-                bh = Float64.(reduce(hcat, a["bottom_height"]))   # nested JSON list -> matrix
                 lon = collect(Float64, store.axes.lon)
                 lat = collect(Float64, store.axes.lat)
+                bh = _parse_bottom_height(a, length(lon), length(lat))
                 size(bh) == (length(lon), length(lat)) || error(
                     "The store at $(store.location) carries a bottom_height of size " *
                     "$(size(bh)) for a $(length(lon)) x $(length(lat)) grid. The seabed a " *
@@ -1385,7 +1366,7 @@ function _larval_bathymetry(opts::HydrodynamicOptions, store)
     destination = joinpath(Tethys.store_path(String(src)), "bathymetry.zarr")
     arr = try
         ds = if ispath(destination)
-            Tethys.geoload(destination)
+            Tethys.load_dataset(destination)
         else
             Tethys.bathymetry_dataset(;
                 source = src, lon_range = lon_r, lat_range = lat_r,
@@ -1419,10 +1400,3 @@ end
 Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
 """
 _run_bathymetry_source(args...; kwargs...) = error("`_run_bathymetry_source` is owned by TethysFlow, not by this package.")
-
-"""
-    expand_domain_with_buffer(args...; kwargs...)
-
-Owned by the OCEAN half. TethysDrift calls into neither package's ocean half: importing it would be the edge SPLIT_PLAN.md section 1 forbids. A larval `--viz` that renders a hydrodynamic field is this package describing the ocean, and should read the store the ocean half wrote.
-"""
-expand_domain_with_buffer(args...; kwargs...) = error("`expand_domain_with_buffer` is owned by TethysFlow, not by this package.")

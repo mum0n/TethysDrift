@@ -1,12 +1,12 @@
-# TethysDrift.jl: Comprehensive User Guide & Reference 
+# TethysDrift.jl: Reference Guide
 
-**A High-Performance Biophysical Ocean Modeling, Lagrangian Particle Tracking, and Demographic Population Connectivity Framework**
+**Biophysical Larval Transport, Physiology, and Demographic Connectivity**
 
 ---
 
 ## 1. Foundations
 
-`TethysDrift.jl` is a high-performance Julia biophysical modeling system designed to simulate 3D ocean hydrodynamics, Lagrangian particle transport, individual-based larval physiology, and macro-regional population connectivity across continental shelf environments.
+`TethysDrift.jl` is a Julia biophysical modeling package for Lagrangian particle transport, individual-based larval physiology, and regional population connectivity across continental shelf environments, driven by stored 3D ocean hydrodynamics from `TethysFlow`.
 
 Originally parameterized for the **Scotian Shelf snow crab (*Chionoecetes opilio*)** ecosystem in the Northwest Atlantic (Fisheries and Oceans Canada Crab Fishing Areas CFAs 20–22, 23–24, and 4X), the framework is fully generalizable to any marine species or regional ocean basin worldwide.
 
@@ -14,16 +14,16 @@ Originally parameterized for the **Scotian Shelf snow crab (*Chionoecetes opilio
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                     TethysDrift.jl End-to-End System                   │
 └─────────────────────────────────────────────────────────────────────────────┘
-  1. Open Data Ingestion (NOAA ERDDAP ETOPO/GEBCO & Blended Sea Winds)
+  - Open Data Ingestion (NOAA ERDDAP ETOPO/GEBCO & Blended Sea Winds)
                                 │
                                 ▼
-  2. 3D Hydrodynamic Model (Oceananigans.jl on CUDA GPU / Multi-Threaded CPU)
+  - 3D Hydrodynamic Model (Oceananigans.jl on CUDA GPU / Multi-Threaded CPU)
      - Spherical Curvilinear Grid + Immersed Boundary Topography
      - Coriolis + Seawater Buoyancy, with the tide read from the ocean half's store
      - CMIP6 Climate Scenarios (Historical, SSP1-2.6, SSP2-4.5, SSP5-8.5, MHW)
                                 │
                                 ▼
-  3. Individual-Based Lagrangian Particle Tracking (Euler-Maruyama SDE)
+  - Individual-Based Lagrangian Particle Tracking (Euler-Maruyama SDE)
      - Marine Bathymetric Rejection Sampling (Strict Water Placement >= 100m)
      - Stage-Dependent Diel Vertical Migration (DVM) Active Swimming
      - In Situ Thermal Degree-Day Ontogenetic Molting (Zoea I -> II -> Megalopa)
@@ -31,18 +31,18 @@ Originally parameterized for the **Scotian Shelf snow crab (*Chionoecetes opilio
      - Cold Intermediate Layer (CIL) Nursery Settlement Criteria
                                 │
                                 ▼
-  4. Spatial Demographics & Administrative CFA Polygon Ray-Casting
+  - Spatial Demographics & Administrative CFA Polygon Ray-Casting
      - CFA North (20-22), CFA South (23-24), CFA 4X (SW Nova Scotia)
      - Transition Probability Matrices (P_ij), Self-Retention & Export
      - Taylor Dispersion Empirical Velocity & Turbulent Diffusivity Fields
                                 │
                                 ▼
-  5. Multi-Layer NetCDF / JLD2 / GeoData Analytical Engine
+  - Multi-Layer NetCDF / JLD2 / GeoData Analytical Engine
      - GeoData Analytical Storage (outputs/particle_tracking.zarr)
      - Multi-Scenario Intercomparison & Bayesian / Ensemble Model Averaging
                                 │
                                 ▼
-  6. Visualizations & Standalone Interactive Leaflet.js Dashboard
+  - Visualizations & Standalone Interactive Leaflet.js Dashboard
      - 8 Publication-Ready CairoMakie Diagnostic Charts
      - Interactive HTML5 Map with Playback Scrubber, Live Telemetry & CFA Polygons
 ```
@@ -92,19 +92,19 @@ TethysDrift/
 
 | Source File                                                                                            | Primary Purpose                                               | Exported Functions / Types                                                                                                                                                                                                                                                                                                |
 | :-------------------------------------------------------------------------------------------------------| :--------------------------------------------------------------| :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [`src/configuration.jl`](file:///c:/home/jae/projects/TethysDrift/src/configuration.jl)           | Centralized TOML configuration parsing and options conversion | `HydrodynamicOptions`, `load_configuration`, `save_configuration`, `configuration_to_options`, `options_to_configuration`, `get_default_configuration`, `find_default_config_path`                                                                                                                                        |
-| [`src/architecture.jl`](file:///c:/home/jae/projects/TethysDrift/src/architecture.jl)             | Hardware platform detection and device allocation             | `resolve_architecture`                                                                                                                                                                                                                                                                                                    |
-| [`src/open_data.jl`](file:///c:/home/jae/projects/TethysDrift/src/open_data.jl)                   | NOAA ERDDAP bathymetry & wind ingestion, drag laws            | `fetch_open_bathymetry`, `fetch_open_surface_winds`, `wind_speed_to_kinematic_stress`, `regrid_2d_field`                                                                                                                                                                                                                  |
-| [`src/synthetic_data.jl`](file:///c:/home/jae/projects/TethysDrift/src/synthetic_data.jl)         | Synthetic idealized benchmarks & NetCDF inspection            | `download_sample_data`, `inspect_netcdf`, `generate_synthetic_bathymetry`, `generate_synthetic_forcing`                                                                                                                                                                                                                   |
-| [`src/grid_bathymetry.jl`](file:///c:/home/jae/projects/TethysDrift/src/grid_bathymetry.jl)       | Spherical grid & cut-cell immersed boundary setup             | `build_shelf_grid`, `load_bathymetry_from_netcdf`, `apply_immersed_bathymetry`, `get_bathymetry_interpolator`, `load_coastline_polygons`, `is_point_on_land`                                                                                                                                                            |
-| [`src/hydrodynamic_model.jl`](file:///c:/home/jae/projects/TethysDrift/src/hydrodynamic_model.jl) | Hydrostatic Boussinesq primitive equation & heat flux         | `build_hydrodynamic_model`, `set_initial_stratification!`                                                                                                                                                                                                                                                                 |
-| [`src/tides.jl`](file:///c:/home/jae/projects/TethysDrift/src/tides.jl)                           | Simpson-Hunter tidal-mixing diagnostic                       | `simpson_hunter_parameter`                                                                                                                                                                                                                     |
-| [`src/climate_scenarios.jl`](file:///c:/home/jae/projects/TethysDrift/src/climate_scenarios.jl)   | CMIP6 downscaling, PLD formulas, thermal mortality            | `ClimateScenarioDelta`, `get_climate_scenario`, `apply_climate_anomaly_to_stratification`, `temperature_dependent_pld`, `larval_thermal_mortality_rate`                                                                                                                                                                     |
-| [`src/simulation.jl`](file:///c:/home/jae/projects/TethysDrift/src/simulation.jl)                 | Time integration, adaptive CFL, 4D output interpolation       | `setup_hydrodynamic_simulation`, `run_hydrodynamic_simulation!`, `create_flow_interpolator_from_jld2`, `compute_advective_cfl`, `find_latest_checkpoint`, `inspect_hydrodynamic_checkpoint`, `inspect_hydrodynamic_file` |
-| [`src/larval_behavior.jl`](file:///c:/home/jae/projects/TethysDrift/src/larval_behavior.jl)       | DVM swimming, BBL shear, sinking, drift, tracking             | `initialize_larval_particles`, `larval_ascent_velocity`, `diel_vertical_migration_velocity`, , `bbl_velocity_factor`, `larval_passive_sinking_velocity`, `update_larval_stage`, `evaluate_settlement_suitability`, `larval_transport_step`, `track_larval_cohort`, `canonicalize_trajectories`                  |
-| [`src/empirical_analysis.jl`](file:///c:/home/jae/projects/TethysDrift/src/empirical_analysis.jl) | Taylor dispersion, CFA polygons, recruitment connectivity     | `estimate_empirical_movement`, `compute_gridded_recruitment_metrics`, `compute_gridded_thermal_metrics`, `point_in_polygon`, `load_cfa_polygons`, `compute_empirical_connectivity`, `connectivity_transitions`, `export_larval_dispersal_netcdf`, `export_larval_dispersal_jld2`                                     |
-| [`src/analysis/larval_storage.jl`](file:///c:/home/jae/projects/TethysDrift/src/analysis/larval_storage.jl)         | GeoData analytical backend & ensemble averaging                | `open_storage`, `close_storage`, `save_simulation_run!`, `load_run_configuration`, `list_simulation_runs`, `load_trajectories_df`, `load_connectivity_matrix`, `compare_scenarios`, `compute_ensemble_model_average`                                                                                         |
-| [`src/visualization.jl`](file:///c:/home/jae/projects/TethysDrift/src/visualization.jl)           | CairoMakie figures, spatiotemporal video animations & Leaflet dashboard | `plot_particle_trajectories`, `plot_dvm_depth_profiles`, `plot_larval_dispersal_density`, `plot_empirical_movement_field`, `plot_connectivity_matrix`, `plot_thermal_exposure_map`, `plot_recruitment_summary`, `plot_climate_scenario_comparison`, `plot_hydrodynamic_field`, `plot_hydrodynamic_advection`, `plot_hydrodynamic_tracers`, `plot_hydrodynamic_stratification`, `plot_hydrodynamic_diffusion`, `plot_hydrodynamic_section`, `plot_hydrodynamic_timeseries`, `animate_hydrodynamic_field`, `animate_hydrodynamic_dashboard`, `export_interactive_tracks_html`, `plot_interactive_trajectories_map` |
+| [`src/configuration.jl`](../src/configuration.jl)           | Centralized TOML configuration parsing and options conversion | `HydrodynamicOptions`, `load_configuration`, `save_configuration`, `configuration_to_options`, `options_to_configuration`, `get_default_configuration`, `find_default_config_path`                                                                                                                                        |
+| [`src/architecture.jl`](../src/architecture.jl)             | Hardware platform detection and device allocation             | `resolve_architecture`                                                                                                                                                                                                                                                                                                    |
+| [`src/open_data.jl`](../src/open_data.jl)                   | NOAA ERDDAP bathymetry & wind ingestion, drag laws            | `fetch_open_bathymetry`, `fetch_open_surface_winds`, `wind_speed_to_kinematic_stress`, `regrid_2d_field`                                                                                                                                                                                                                  |
+| [`src/synthetic_data.jl`](../src/synthetic_data.jl)         | Synthetic idealized benchmarks & NetCDF inspection            | `download_sample_data`, `inspect_netcdf`, `generate_synthetic_bathymetry`, `generate_synthetic_forcing`                                                                                                                                                                                                                   |
+| [`src/grid_bathymetry.jl`](../src/grid_bathymetry.jl)       | Spherical grid & cut-cell immersed boundary setup             | `build_shelf_grid`, `load_bathymetry`, `apply_immersed_bathymetry`, `get_bathymetry_interpolator`, `load_coastline`, `is_point_on_land`                                                                                                                                                            |
+| [`src/hydrodynamic_model.jl`](../src/hydrodynamic_model.jl) | Hydrostatic Boussinesq primitive equation & heat flux         | `build_hydrodynamic_model`, `set_initial_stratification!`                                                                                                                                                                                                                                                                 |
+| [`src/tides.jl`](../src/tides.jl)                           | Simpson-Hunter tidal-mixing diagnostic                       | `simpson_hunter_parameter`                                                                                                                                                                                                                     |
+| [`src/climate_scenarios.jl`](../src/climate_scenarios.jl)   | CMIP6 downscaling, PLD formulas, thermal mortality            | `ClimateScenarioDelta`, `get_climate_scenario`, `apply_climate_anomaly_to_stratification`, `temperature_dependent_pld`, `larval_thermal_mortality_rate`                                                                                                                                                                     |
+| [`src/simulation.jl`](../src/simulation.jl)                 | Time integration, adaptive CFL, 4D output interpolation       | `setup_hydrodynamic_simulation`, `run_hydrodynamic_simulation!`, `create_flow_interpolator_from_jld2`, `compute_advective_cfl`, `find_latest_checkpoint`, `inspect_hydrodynamic_checkpoint`, `inspect_hydrodynamic_file` |
+| [`src/larval_behavior.jl`](../src/larval_behavior.jl)       | DVM swimming, BBL shear, sinking, drift, tracking             | `initialize_larval_particles`, `larval_ascent_velocity`, `diel_vertical_migration_velocity`, , `bbl_velocity_factor`, `larval_passive_sinking_velocity`, `update_larval_stage`, `evaluate_settlement_suitability`, `larval_transport_step`, `track_larval_cohort`, `canonicalize_trajectories`                  |
+| [`src/empirical_analysis.jl`](../src/empirical_analysis.jl) | Taylor dispersion, CFA polygons, recruitment connectivity     | `estimate_empirical_movement`, `compute_gridded_recruitment_metrics`, `compute_gridded_thermal_metrics`, `point_in_polygon`, `load_cfa_polygons`, `compute_empirical_connectivity`, `connectivity_transitions`, `export_larval_dispersal_netcdf`, `export_larval_dispersal_jld2`                                     |
+| [`src/analysis/larval_storage.jl`](../src/analysis/larval_storage.jl)         | GeoData analytical backend & ensemble averaging                | `open_storage`, `close_storage`, `save_simulation_run!`, `load_run_configuration`, `list_simulation_runs`, `load_trajectories_df`, `load_connectivity_matrix`, `compare_scenarios`, `compute_ensemble_model_average`                                                                                         |
+| [`src/visualization.jl`](../src/visualization.jl)           | CairoMakie figures, spatiotemporal video animations & Leaflet dashboard | `plot_particle_trajectories`, `plot_dvm_depth_profiles`, `plot_larval_dispersal_density`, `plot_empirical_movement_field`, `plot_connectivity_matrix`, `plot_thermal_exposure_map`, `plot_recruitment_summary`, `plot_climate_scenario_comparison`, `plot_hydrodynamic_field`, `plot_hydrodynamic_advection`, `plot_hydrodynamic_tracers`, `plot_hydrodynamic_stratification`, `plot_hydrodynamic_diffusion`, `plot_hydrodynamic_section`, `plot_hydrodynamic_timeseries`, `animate_hydrodynamic_field`, `animate_hydrodynamic_dashboard`, `export_interactive_tracks_html`, `plot_interactive_trajectories_map` |
 
 ---
 
@@ -168,7 +168,7 @@ Superposition of $M_2$ and $S_2$ generates the classic 14.77-day spring-neap bea
 
 $$T_{\text{spring-neap}} = \frac{T_{M2} T_{S2}}{|T_{M2} - T_{S2}|} \approx 14.77\text{ days}$$
 
-To diagnose tidal mixing fronts and boundary layer separation over shallow banks under tidal and atmospheric forcing, we compute the generalized Simpson-Hunter parameter $\chi$ (Garrett, Keeley & Greenberg 1978; Loder & Greenberg 1986):
+To diagnose tidal mixing fronts and boundary layer separation over shallow banks under tidal and atmospheric forcing, the generalized Simpson-Hunter parameter $\chi$ is evaluated as (Garrett, Keeley & Greenberg 1978; Loder & Greenberg 1986):
 
 $$\chi = \log_{10}\left( \frac{h}{U_{\text{tide}}^3 + \gamma U_{\text{wind}}^3} \right)$$
 
@@ -278,8 +278,8 @@ In energetic tidal regions (CFAs 20–22), semi-diurnal $M_2$ tides displace the
 $$\bar{T}_{\text{bed}}(t + \Delta t) = (1 - \alpha) \bar{T}_{\text{bed}}(t) + \alpha T_{\text{bed}}(t), \quad \alpha = \text{clamp}\left(\frac{\Delta t}{44712}, 0.005, 1.0\right)$$
 
 Competent Megalopae settle when:
-1. **Depth Suitability**: $-250.0\text{ m} \le z_{\text{bed}} \le -50.0\text{ m}$;
-2. **Thermal Suitability**: Tidally averaged bottom temperature $\bar{T}_{\text{bed}} \le 6.0^\circ\text{C}$.
+- **Depth Suitability**: $-250.0\text{ m} \le z_{\text{bed}} \le -50.0\text{ m}$;
+- **Thermal Suitability**: Tidally averaged bottom temperature $\bar{T}_{\text{bed}} \le 6.0^\circ\text{C}$.
 
 ---
 
@@ -338,7 +338,7 @@ ref_wind_v = 3.2                    # Baseline 10m meridional wind speed (m/s)
 
 [tides]
 # The tide is carried by GeoOceanModel's stored flow field (TPXO9 boundary forcing).
-# GeoLarvalTracking reads it from the store and superposes nothing on top, so there
+# TethysDrift reads it from the store and superposes nothing on top, so there
 # are no tidal settings to make here.
 
 [climate]
@@ -405,7 +405,7 @@ settlement_max_temp = 6.0           # Maximum benthic temperature for settlement
 
 [storage]
 storage_backend = "zarr"            # Storage backend ("zarr" or "geoparquet")
-output_dir = "../lakehouse/GeoLarvalTracking/default" # Where the run writes
+output_dir = "../lakehouse/TethysDrift/default" # Where the run writes
 ocean_model = "../lakehouse/GeoOceanModel/default/hydrodynamics.zarr" # The ocean store read
 
 [visualization]
@@ -430,10 +430,10 @@ seed = 42                           # RNG seed for reproducible stochastic runs
 ## 1. Setup & Package Loading
 
 ```julia
-cd("c:/home/jae/work/TethysDrift")  # your work directory
+cd("path/to/work/TethysDrift")  # work directory
 
 # Load module and all dependencies (this may require multiple runs and Julia restarts)  
-include("c:/home/jae/projects/TethysDrift/src/TethysDrift.jl")
+using TethysDrift
 
 using .TethysDrift # the leading "." is not a typo
 
@@ -663,7 +663,7 @@ The adaptive CFL controller in `compute_advective_cfl` evaluates layer-resolved 
 
 $$\text{CFL}_z = \max_{k} \left( \frac{\max_{i,j} |w_{i,j,k}| \Delta t}{\Delta z_k} \right)$$
 
-where $\Delta z_k = z_{F, k+1} - z_{F, k}$ corresponds precisely to the vertical cell spacing at depth layer $k$. The comprehensive 3D advective CFL number satisfies:
+where $\Delta z_k = z_{F, k+1} - z_{F, k}$ is the vertical cell spacing at depth layer $k$. The 3D advective CFL number satisfies:
 
 $$\text{CFL}_{\text{total}} = \Delta t \left( \frac{\max |u|}{\Delta x} + \frac{\max |v|}{\Delta y} + \max_k \frac{\max_{i,j} |w_{i,j,k}|}{\Delta z_k} \right) \le \text{CFL}_{\text{target}}$$
 
@@ -770,7 +770,7 @@ conn = compute_empirical_connectivity(
 println("\nTransition Probability Matrix (P_ij):")
 display(round.(conn.matrix, digits=3))
 
-# 5. Export comprehensive multi-variable NetCDF and JLD2 archives
+# 5. Export multi-variable NetCDF4 and Zarr archives
 export_larval_dispersal_netcdf(
   "outputs/larval_dispersal_analysis.nc",
   trajectories=trajectories,
@@ -787,14 +787,14 @@ export_larval_dispersal_jld2(
 ## 9. Visualization & Cross-Scenario Comparisons
 
 `TethysDrift.jl` provides two tiers of publication-grade CairoMakie visualizations:
-1. **Lagrangian Larval Trajectory & Demographic Diagnostics**: Drift pathways, DVM vertical profiles, settlement kernel density, empirical Taylor dispersion fields, demographic connectivity matrices, and multi-scenario climate comparisons.
-2. **Eulerian Hydrodynamic Diagnostic Visualizations**: Horizontal advection current speed with velocity quivers, potential temperature and salinity tracers, buoyancy frequency $N^2$ and potential density $\rho$, turbulent vertical eddy diffusivity $\kappa_v$ and viscosity $\nu_v$, vertical cross-sections across the water column, and multi-depth timeseries.
+- **Lagrangian Larval Trajectory & Demographic Diagnostics**: Drift pathways, DVM vertical profiles, settlement kernel density, empirical Taylor dispersion fields, demographic connectivity matrices, and multi-scenario climate comparisons.
+- **Eulerian Hydrodynamic Diagnostic Visualizations**: Horizontal advection current speed with velocity quivers, potential temperature and salinity tracers, buoyancy frequency $N^2$ and potential density $\rho$, turbulent vertical eddy diffusivity $\kappa_v$ and viscosity $\nu_v$, vertical cross-sections across the water column, and multi-depth timeseries.
 
 ### 9.1 Lagrangian Larval Trajectories & Demographic Plots
 
 ```julia
 # 1. Plot 2D trajectories over Scotian Shelf bathymetry
-bathy_grid_data = load_bathymetry_from_netcdf(real_bathy_file)
+bathy_grid_data = load_bathymetry(real_bathy_file)
 
 fig_tracks = plot_particle_trajectories(
   trajectories,
@@ -943,7 +943,7 @@ export_interactive_tracks_html(
 ## 11. Hardware Acceleration, Video Animation & Interactive Visualization
 
 ### GPU / CUDA Hardware Acceleration
-Oceananigans natively supports NVIDIA CUDA GPU execution using unified memory and streaming multiprocessors. The workflow integrates [`resolve_architecture`](file:///c:/home/jae/projects/TethysDrift/src/architecture.jl).
+Oceananigans natively supports NVIDIA CUDA GPU execution using unified memory and streaming multiprocessors. The workflow integrates [`resolve_architecture`](../src/architecture.jl).
 
 ---
 
@@ -959,28 +959,28 @@ The visualizer exports an interactive Leaflet.js dashboard (`outputs/interactive
 
 ### Spatiotemporal Hydrodynamic Field & Dashboard Animation (CairoMakie)
 
-`TethysDrift.jl` provides dedicated hydrodynamic animation engines implemented in [`src/visualization.jl`](file:///c:/home/jae/projects/TethysDrift/src/visualization.jl) using CairoMakie's native video rendering engine:
-- [`animate_hydrodynamic_field`](file:///c:/home/jae/projects/TethysDrift/src/visualization.jl#L4046-L4289): Renders individual 2D horizontal field slices $F(x, y, z_k, t_m)$ across temporal snapshots $t_m$.
-- [`animate_hydrodynamic_dashboard`](file:///c:/home/jae/projects/TethysDrift/src/visualization.jl#L4292-L4525): Renders a synchronized 4-panel multi-field diagnostic dashboard.
+`TethysDrift.jl` provides dedicated hydrodynamic animation engines implemented in [`src/visualization.jl`](../src/visualization.jl) using CairoMakie's native video rendering engine:
+- [`animate_hydrodynamic_field`](../src/visualization.jl#L4046-L4289): Renders individual 2D horizontal field slices $F(x, y, z_k, t_m)$ across temporal snapshots $t_m$.
+- [`animate_hydrodynamic_dashboard`](../src/visualization.jl#L4292-L4525): Renders a synchronized 4-panel multi-field diagnostic dashboard.
 
 Both engines stream animation frames directly into `.mp4` (H.264 container) or `.gif` using CairoMakie reactive `Observable(matrix)` updates. Rather than redrawing static axes, ticks, or colorbars, each frame only refreshes matrix buffers and temporal title strings, allowing high throughput encoding.
 
 #### Mathematical Formulations
 
-1. **Horizontal Current Advection Speed**:
+- **Horizontal Current Advection Speed**:
    $$|\boldsymbol{u}_h(x, y, z_k, t_m)| = \sqrt{u^2(x, y, z_k, t_m) + v^2(x, y, z_k, t_m)}$$
 
-2. **Relative Vertical Vorticity**:
+- **Relative Vertical Vorticity**:
    $$\zeta(x, y, z_k, t_m) = \frac{\partial v}{\partial x} - \frac{\partial u}{\partial y}$$
 
-3. **Seawater Potential Density (Boussinesq Linear EOS)**:
+- **Seawater Potential Density (Boussinesq Linear EOS)**:
    $$\rho(S, T) = \rho_0 \left[1 - \alpha (T - T_0) + \beta (S - S_0)\right]$$
    where $\rho_0 = 1025\text{ kg m}^{-3}$, thermal expansion $\alpha = 1.7 \times 10^{-4}\text{ K}^{-1}$, and haline contraction $\beta = 7.6 \times 10^{-4}\text{ PSU}^{-1}$.
 
-4. **Brunt-Väisälä Buoyancy Frequency Squared**:
+- **Brunt-Väisälä Buoyancy Frequency Squared**:
    $$N^2 = -\frac{g}{\rho_0} \frac{\partial \rho}{\partial z}$$
 
-5. **Turbulent Vertical Eddy Diffusivity & Viscosity**:
+- **Turbulent Vertical Eddy Diffusivity & Viscosity**:
    Derived from the gradient Richardson number $Ri$ (Pacanowski & Philander, 1981):
    $$Ri = \frac{N^2}{(\partial_z u)^2 + (\partial_z v)^2}$$
    $$\kappa_v = \kappa_0 + \frac{\kappa_{\text{max}}}{(1 + 5Ri)^2} + \kappa_{\text{surf}} \exp\left(\frac{z}{h_{\text{mix}}}\right)$$
@@ -989,7 +989,7 @@ Both engines stream animation frames directly into `.mp4` (H.264 container) or `
 
 #### Diagnostic Field Variables
 
-Field extraction via [`resolve_hydrodynamic_frame_data`](file:///c:/home/jae/projects/TethysDrift/src/visualization.jl#L4021-L4045) supports the following diagnostic options:
+Field extraction via [`resolve_hydrodynamic_frame_data`](../src/visualization.jl#L4021-L4045) supports the following diagnostic options:
 
 | Variable Identifier | Aliases | Physical Metric | Colormap |
 | :--- | :--- | :--- | :--- |
@@ -1008,7 +1008,7 @@ Field extraction via [`resolve_hydrodynamic_frame_data`](file:///c:/home/jae/pro
 
 #### Continuous Depth Selection
 
-Depth resolution is handled continuously via [`resolve_depth_index`](file:///c:/home/jae/projects/TethysDrift/src/visualization.jl#L667-L682):
+Depth resolution is handled continuously via [`resolve_depth_index`](../src/visualization.jl#L667-L682):
 $$k_{\text{target}} = \arg\min_k |z_k - z_{\text{target}}|$$
 - **Surface**: Set `depth = 0.0` or `depth = -2.5` (or discrete `depth_level = 1`).
 - **Cold Intermediate Layer (CIL)**: Set `depth = -50.0` (or `depth = 50.0`).
@@ -1018,9 +1018,9 @@ $$k_{\text{target}} = \arg\min_k |z_k - z_{\text{target}}|$$
 #### Custom Output File Designation
 
 Animation destinations can be designated explicitly via:
-1. **API**: Pass `output_path = "outputs/custom_name.mp4"` (or `.gif`). Parent directories are created automatically via `mkpath(dirname(output_path))`.
-2. **CLI**: Pass `--anim-output=<path>` or `--anim-file=<path>`.
-3. **Configuration**: Set `anim_output_path = "<path>"` under `[visualization]`.
+- **API**: Pass `output_path = "outputs/custom_name.mp4"` (or `.gif`). Parent directories are created automatically via `mkpath(dirname(output_path))`.
+- **CLI**: Pass `--anim-output=<path>` or `--anim-file=<path>`.
+- **Configuration**: Set `anim_output_path = "<path>"` under `[visualization]`.
 
 If left empty, the engine synthesizes default filenames in `opts.output_dir`:
 - Single field: `$(opts.output_dir)/hydrodynamic_$(opts.anim_variable)_animation.$(opts.anim_format)`
@@ -1028,11 +1028,11 @@ If left empty, the engine synthesizes default filenames in `opts.output_dir`:
 
 #### Synchronized 4-Panel Dashboard Structure
 
-The [`animate_hydrodynamic_dashboard`](file:///c:/home/jae/projects/TethysDrift/src/visualization.jl#L4292-L4525) function produces a synchronized four-panel layout:
-1. **Panel $(1, 1)$**: Horizontal current speed $|\boldsymbol{u}_h|$ at the selected depth, overlaid with bathymetric isobaths ($-50\text{ m}, -100\text{ m}, -200\text{ m}, \dots$) and optional moving Lagrangian particle positions.
-2. **Panel $(1, 2)$**: Relative vertical vorticity $\zeta(x, y)$ capturing mesoscale eddies, shear fronts, and coastal boundary jets.
-3. **Panel $(2, 1)$**: Zonal vertical cross-section $T(x, z)$ across the full water column along a user-specified latitude transect (`section_lat`, default $44.0^\circ\text{N}$).
-4. **Panel $(2, 2)$**: Sea surface height elevation $\eta(x, y)$ tracking barotropic tidal wave propagation and atmospheric setup.
+The [`animate_hydrodynamic_dashboard`](../src/visualization.jl#L4292-L4525) function produces a synchronized four-panel layout:
+- **Panel $(1, 1)$**: Horizontal current speed $|\boldsymbol{u}_h|$ at the selected depth, overlaid with bathymetric isobaths ($-50\text{ m}, -100\text{ m}, -200\text{ m}, \dots$) and optional moving Lagrangian particle positions.
+- **Panel $(1, 2)$**: Relative vertical vorticity $\zeta(x, y)$ capturing mesoscale eddies, shear fronts, and coastal boundary jets.
+- **Panel $(2, 1)$**: Zonal vertical cross-section $T(x, z)$ across the full water column along a user-specified latitude transect (`section_lat`, default $44.0^\circ\text{N}$).
+- **Panel $(2, 2)$**: Sea surface height elevation $\eta(x, y)$ tracking barotropic tidal wave propagation and atmospheric setup.
 
 #### Programmatic Julia API Examples
 
@@ -1082,7 +1082,7 @@ animate_hydrodynamic_dashboard(
 
 #### Command-Line Interface (CLI) Animation Workflows
 
-All animation features are directly controllable via [`TethysDriftRun.jl`](file:///c:/home/jae/projects/TethysDrift/TethysDriftRun.jl) flags:
+All animation features are directly controllable via [`TethysDriftRun.jl`](../TethysDriftRun.jl) flags:
 
 ```bash
 # 1. 4-Panel Synchronized Dashboard with Larval Drift Overlays
@@ -1126,14 +1126,14 @@ julia --project=. TethysDriftRun.jl \
 
 ## 12. GeoData Analytical Storage, Scenario Management & Ensemble Model Averaging
 
-Similar to the BSTM modeling framework, `TethysDrift.jl` includes a high-performance **GeoData** analytical storage backend (`src/analysis/larval_storage.jl`) for persisting multi-scenario simulation runs, millions of trajectory steps, demographic transition matrices, and gridded dispersal fields into a single relational database (`outputs/particle_tracking.zarr`).
+`TethysDrift.jl` includes an analytical storage backend (`src/analysis/larval_storage.jl`) backed by Zarr and GeoParquet via `Tethys` for persisting multi-scenario simulation runs, trajectory time series, demographic transition matrices, and gridded dispersal fields (`particle_tracking.zarr`).
 
 ### Database Relational Schema
-1. **`simulation_runs`**: Metadata for each run (scenario name, projection year, $N_{\text{particles}}$, duration, time step, physical & biological options, seed, timestamps).
-2. **`particle_trajectories`**: Columnar time series of particle coordinates $(\lambda, \phi, z)$, ambient temperature $T$, degree-days $DD$, survival probability $S(t)$, developmental stage, and settlement state.
-3. **`recruitment_metrics`**: Summary outcomes per cohort (settlement success rate, mean PLD, mean degree-days, thermal mortality, mean dispersal displacement).
-4. **`connectivity_transitions`**: Demographic transition probabilities $P_{ij}$ and raw transit counts between spatial management strata (e.g. CFAs 20–22, 23–24, 4X).
-5. **`gridded_dispersal_summary`**: Spatial matrices of empirical velocities $(\bar{u}, \bar{v})$, turbulent diffusivity $D_{\text{emp}}$, settlement density, and thermal exposure.
+- **`simulation_runs`**: Metadata for each run (scenario name, projection year, $N_{\text{particles}}$, duration, time step, physical & biological options, seed, timestamps).
+- **`particle_trajectories`**: Columnar time series of particle coordinates $(\lambda, \phi, z)$, ambient temperature $T$, degree-days $DD$, survival probability $S(t)$, developmental stage, and settlement state.
+- **`recruitment_metrics`**: Summary outcomes per cohort (settlement success rate, mean PLD, mean degree-days, thermal mortality, mean dispersal displacement).
+- **`connectivity_transitions`**: Demographic transition probabilities $P_{ij}$ and raw transit counts between spatial management strata (e.g. CFAs 20–22, 23–24, 4X).
+- **`gridded_dispersal_summary`**: Spatial matrices of empirical velocities $(\bar{u}, \bar{v})$, turbulent diffusivity $D_{\text{emp}}$, settlement density, and thermal exposure.
 
 
 ### API Usage
@@ -1172,9 +1172,7 @@ close_storage(db)
 
 ## 13. Centralized Configuration Management (`inputs/TethysDrift.toml`)
 
-To streamline workflow reproducibility and parameter configuration across multiple
-scenarios, all user-configurable defaults are declared in a centralized TOML
-configuration file at [`inputs/TethysDrift.toml`](file:///c:/home/jae/projects/TethysDrift/inputs/TethysDrift.toml).
+To maintain reproducibility and parameter provenance across scenarios, user-configurable defaults are declared in TOML configuration files under `configs/` (e.g. `configs/default.toml`, `configs/snowcrab.toml`).
 
 ### Configuration Sections
 - `[domain]`: Bounding coordinates ($\lambda_{\min}, \lambda_{\max}, \phi_{\min}, \phi_{\max}, z_{\min}, z_{\max}$).
@@ -1210,9 +1208,9 @@ save_configuration(options_to_configuration(opts), "inputs/custom_run.config")
 
 The regional modeling platform ingests official administrative management boundaries
 defined in CSV/DAT format (`lon,lat`):
-- [`inputs/cfa4x.dat`](file:///c:/home/jae/projects/TethysDrift/inputs/cfa4x.dat): Southwest Nova Scotia (CFA 4X, 30 vertices).
-- [`inputs/cfanorth.dat`](file:///c:/home/jae/projects/TethysDrift/inputs/cfanorth.dat): Eastern Cape Breton & Glace Bay (CFA North / 20–22, 17 vertices).
-- [`inputs/cfasouth.dat`](file:///c:/home/jae/projects/TethysDrift/inputs/cfasouth.dat): Middle Scotian Shelf & Halifax (CFA South / 23–24, 28 vertices).
+- [`inputs/cfa4x.dat`](../inputs/cfa4x.dat): Southwest Nova Scotia (CFA 4X, 30 vertices).
+- [`inputs/cfanorth.dat`](../inputs/cfanorth.dat): Eastern Cape Breton & Glace Bay (CFA North / 20–22, 17 vertices).
+- [`inputs/cfasouth.dat`](../inputs/cfasouth.dat): Middle Scotian Shelf & Halifax (CFA South / 23–24, 28 vertices).
 
 ### Point-in-Polygon Classification
 Spatial connectivity calculations use the Jordan Curve (ray-casting) theorem via
@@ -1303,7 +1301,7 @@ if !isfile(flow_checkpoint)
           "Run hydrodynamic simulation once before cohort tracking.")
 end
 
-# Build high-performance in-memory 4D interpolator: (lon, lat, z, t) -> (u, v, w, T)
+# Build 4D interpolator: (lon, lat, z, t) -> (u, v, w, T)
 flow_interpolator = create_flow_interpolator_from_jld2(flow_checkpoint)
 
 velocity_fn = (lon, lat, z, t) -> begin
@@ -1527,7 +1525,7 @@ println("\nMulti-cohort batching and analysis complete.")
 ### 15.3 Workflow 2: Production Segmented CLI Pipeline (`TethysDriftRun.jl`)
 
 In production and High-Performance Computing (HPC) environments, the CLI runner
-[`TethysDriftRun.jl`](file:///c:/home/jae/projects/TethysDrift/TethysDriftRun.jl) allows decoupling hydrodynamics from tracking directly from the command
+[`TethysDriftRun.jl`](../TethysDriftRun.jl) allows decoupling hydrodynamics from tracking directly from the command
 line using segment flags:
 
 #### Step 1: Execute 3D Hydrodynamics Once
@@ -1603,7 +1601,7 @@ julia --project=. TethysDriftRun.jl --model-average --db-path=outputs/particle_t
 ### 15.4 Workflow 3: Dedicated Snow Crab Dispersal Platform (`--snowcrab-settings`)
 
 For dedicated snow crab (*Chionoecetes opilio*) assessment workflows, the platform is integrated
-directly into [`TethysDriftRun.jl`](file:///c:/home/jae/projects/TethysDrift/TethysDriftRun.jl)
+directly into [`TethysDriftRun.jl`](../TethysDriftRun.jl)
 via the `--snowcrab-settings` flag (shorthand: `--snowcrab`). Passing `--snowcrab-settings` automatically
 pre-configures all snow crab calibrated parameters (500 larvae, 60-day PLD, bottom boundary release
 with active vertical ascent, -600 m to 0 m shelf-slope domain, hyperbolic tangent stretched vertical
@@ -1616,11 +1614,11 @@ a calibrated `HydrodynamicOptions` instance with identical parameters.
 
 ##### Performance Optimization & Calibration Architecture
 The calibrated snow crab model achieves a **15× computational speedup** over naïve uniform grids:
-1. **Calibrated Horizontal Discretization**: Adjusted from 1.0 km ($864 \times 611 \times 20 = 10.56\times 10^6$ cells) to ~2.5 km ($345 \times 245 \times 20 = 1.69\times 10^6$ cells), reducing discrete spatial volume by 84% without losing mesoscale eddies or shelf-edge current structure.
-2. **CFL Step Size Relaxation**: The larger cell size relaxes the Courant-Friedrichs-Lewy constraint from $\Delta t = 120\,\text{s}$ to $\Delta t = 300 - 360\,\text{s}$ ($2.5\times$ larger step), slashing total integration iterations for 1.5 years from ~350,000 to ~110,000.
-3. **Hyperbolic Tangent Vertical Coordinate Stretching**: Concentrates vertical resolution near the surface ($\Delta z \approx 8-12\,\text{m}$) for accurate larval ascent, DVM, and wind-driven Ekman shearing, while expanding deep layers to $\Delta z \approx 60-120\,\text{m}$.
-4. **Native NVIDIA CUDA GPU Acceleration**: Runs entirely on GPU using bitstype continuous forcing and parameterized boundary condition closures, executing 5 simulated days (1440 iterations) in ~2.5 minutes on modern laptop GPUs.
-5. **NumericalEarth.DataWrangling Integration**: Real-world ERA5 atmospheric hourly winds and surface heat fluxes coupled with Copernicus GLORYS12V1 3D reanalysis boundary conditions and barotropic tidal forcing (M2 + S2).
+- **Calibrated Horizontal Discretization**: Adjusted from 1.0 km ($864 \times 611 \times 20 = 10.56\times 10^6$ cells) to ~2.5 km ($345 \times 245 \times 20 = 1.69\times 10^6$ cells), reducing discrete spatial volume by 84% without losing mesoscale eddies or shelf-edge current structure.
+- **CFL Step Size Relaxation**: The larger cell size relaxes the Courant-Friedrichs-Lewy constraint from $\Delta t = 120\,\text{s}$ to $\Delta t = 300 - 360\,\text{s}$ ($2.5\times$ larger step), slashing total integration iterations for 1.5 years from ~350,000 to ~110,000.
+- **Hyperbolic Tangent Vertical Coordinate Stretching**: Concentrates vertical resolution near the surface ($\Delta z \approx 8-12\,\text{m}$) for accurate larval ascent, DVM, and wind-driven Ekman shearing, while expanding deep layers to $\Delta z \approx 60-120\,\text{m}$.
+- **Native NVIDIA CUDA GPU Acceleration**: Runs entirely on GPU using bitstype continuous forcing and parameterized boundary condition closures, executing 5 simulated days (1440 iterations) in ~2.5 minutes on modern laptop GPUs.
+- **NumericalEarth.DataWrangling Integration**: Real-world ERA5 atmospheric hourly winds and surface heat fluxes coupled with Copernicus GLORYS12V1 3D reanalysis boundary conditions and barotropic tidal forcing (M2 + S2).
 
 #### Step 1: Hydrodynamic Simulation Only (`--hydro-only`)
 Integrate Oceananigans hydrostatic equations and persist flow fields into a chosen
@@ -1660,8 +1658,8 @@ julia --project=. TethysDriftRun.jl --compare
 ### 15.5 Standalone Interactive HTML5 + Leaflet.js Dashboard
 
 Exported automatically via `export_interactive_tracks_html` to
-[`outputs/interactive_larval_tracks.html`](file:///c:/home/jae/projects/TethysDrift/outputs/interactive_larval_tracks.html):
-- **Multiple Basemaps**: Seamless switching between ESRI Ocean Basemap, CartoDB Dark Matter, and OpenStreetMap.
+[`outputs/interactive_larval_tracks.html`](../outputs/interactive_larval_tracks.html):
+- **Multiple Basemaps**: Switch between ESRI Ocean Basemap, CartoDB Dark Matter, and OpenStreetMap.
 - **Dynamic Playback Control**: Time slider scrubber ($t = 0 \to 5\text{ days}$) with Play/Pause animation and speed toggles ($1\times, 5\times, 20\times$).
 - **Ontogenetic Color-Coding**: Dynamic color transitions for Zoea I, Zoea II, Megalopa, Instar I (settled recruit), and thermal mortality.
 - **Live Telemetry HUD**: Hover and click popups displaying real-time depth ($z$), in-situ temperature ($T$), cumulative degree-days ($DD$), and survival probability ($S(t)$).
@@ -1679,38 +1677,38 @@ julia --project=. test/runtests.jl
 ```
 
 The test sets cover:
-1. Drag law and open data ingestion utilities.
-2. Synthetic data generation and NetCDF dataset inspection.
-3. Immersed boundary grid geometry and Coriolis parameters.
-4. Hydrodynamic model configuration, boundary conditions, and CMIP6 scenarios.
-5. Simpson-Hunter tidal-mixing stratification diagnostics over the shelf banks.
-6. Larval DVM and settlement environmental filters.
-7. Lagrangian particle tracking, numerical integration, and marine land exclusion.
-8. Empirical movement velocity and turbulent diffusivity estimation.
-9. Gridded recruitment metrics and thermal exposure analysis.
-10. Empirical demographic connectivity matrix computation and NetCDF / JLD2 export.
-11. CairoMakie spatial figures, vertical profiles, and diagnostics rendering.
-12. GPU architecture detection and automatic CPU fallback.
-13. Standalone interactive HTML5 Leaflet dashboard generation.
-14. GeoData analytical storage, multi-scenario querying, and ensemble averaging.
-15. Centralized TOML configuration parsing, validation, and scenario metadata.
-16. Coastline geometry, 0% land seeding, and CFA polygon intersection.
-17. Enhanced physical and biophysical processes (bottom release, active ascent, surface heat flux).
+- Drag law and open data ingestion utilities.
+- Synthetic data generation and NetCDF dataset inspection.
+- Immersed boundary grid geometry and Coriolis parameters.
+- Hydrodynamic model configuration, boundary conditions, and CMIP6 scenarios.
+- Simpson-Hunter tidal-mixing stratification diagnostics over the shelf banks.
+- Larval DVM and settlement environmental filters.
+- Lagrangian particle tracking, numerical integration, and marine land exclusion.
+- Empirical movement velocity and turbulent diffusivity estimation.
+- Gridded recruitment metrics and thermal exposure analysis.
+- Empirical demographic connectivity matrix computation and NetCDF / JLD2 export.
+- CairoMakie spatial figures, vertical profiles, and diagnostics rendering.
+- GPU architecture detection and automatic CPU fallback.
+- Standalone interactive HTML5 Leaflet dashboard generation.
+- GeoData analytical storage, multi-scenario querying, and ensemble averaging.
+- Centralized TOML configuration parsing, validation, and scenario metadata.
+- Coastline geometry, 0% land seeding, and CFA polygon intersection.
+- Enhanced physical and biophysical processes (bottom release, active ascent, surface heat flux).
 
 ### 16.2 Adding a New Climate Scenario
 To add a new CMIP6 scenario (e.g. `ssp370`):
-1. In [`src/climate_scenarios.jl`](file:///c:/home/jae/projects/TethysDrift/src/climate_scenarios.jl), register a new `ClimateScenarioDelta` entry in `get_climate_scenario`:
+- In [`src/climate_scenarios.jl`](../src/climate_scenarios.jl), register a new `ClimateScenarioDelta` entry in `get_climate_scenario`:
    ```julia
    elseif sc_sym == :ssp370
        return ClimateScenarioDelta(:ssp370, "CMIP6 SSP3-7.0", 2.6, 1.4, -0.65, 1.15)
    ```
-2. Update the CLI choices in [`TethysDriftRun.jl`](file:///c:/home/jae/projects/TethysDrift/TethysDriftRun.jl) and configuration parsing in [`src/configuration.jl`](file:///c:/home/jae/projects/TethysDrift/src/configuration.jl).
+- Update the CLI choices in [`TethysDriftRun.jl`](../TethysDriftRun.jl) and configuration parsing in [`src/configuration.jl`](../src/configuration.jl).
 
 ### 16.3 Adding a New Biological Species
 To model a different marine species (e.g. American Lobster *Homarus americanus*):
-1. Adjust degree-day molting thresholds and swimming target depths in [`inputs/TethysDrift.toml`](file:///c:/home/jae/projects/TethysDrift/inputs/TethysDrift.toml).
-2. Specify nursery depth and bottom temperature limits under `[molting_and_settlement]`.
-3. Configure stage-specific vertical migration targets and phototaxis responses under `[dvm]`.
+- Adjust degree-day molting thresholds and swimming target depths in [`inputs/TethysDrift.toml`](../inputs/TethysDrift.toml).
+- Specify nursery depth and bottom temperature limits under `[molting_and_settlement]`.
+- Configure stage-specific vertical migration targets and phototaxis responses under `[dvm]`.
 
 ---
 
@@ -1759,4 +1757,3 @@ To model a different marine species (e.g. American Lobster *Homarus americanus*)
 - **Egbert, G. D., & Erofeeva, S. Y.** (2002). Efficient inverse modeling of barotropic ocean tides. *Journal of Atmospheric and Oceanic Technology*, 19(2), 183–204. DOI: [10.1175/1520-0426(2002)019<0183:EIMOBO>2.0.CO;2](https://doi.org/10.1175/1520-0426(2002)019<0183:EIMOBO>2.0.CO;2)
 - **Pugh, D., & Woodworth, P.** (2014). *Sea-Level Science: Understanding Tides, Surges, Tsunamis and Mean Sea-Level Changes*. Cambridge University Press. DOI: [10.1017/CBO9781139235778](https://doi.org/10.1017/CBO9781139235778)
 - **Simpson, J. H., & Hunter, J. R.** (1974). Fronts in the Irish Sea. *Nature*, 250(5465), 404–406. DOI: [10.1038/250404a0](https://doi.org/10.1038/250404a0)
-
