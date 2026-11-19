@@ -33,9 +33,9 @@ _json_num(x::Real; digits::Int = 4) = isfinite(x) ? string(round(x; digits = dig
 
 Generate an interactive HTML5 + Leaflet.js dashboard paired with a
 zlib-compressed binary sidecar (`<stem>.data.zz`) containing the 4D Lagrangian
-particle tracks, developmental stages, DVM behaviors, settlement density, and
-regional Crab Fishing Area (CFA) connectivity. Eulerian hydrodynamic grids are
-intentionally omitted from the dashboard payload (handled by TethysFlow).
+particle tracks, developmental stages, DVM behaviors, and settlement density.
+Eulerian hydrodynamic grids and regional CFA overlays are omitted from the
+dashboard payload.
 
 When served over HTTP/HTTPS (including GitHub Pages or a local static server),
 the HTML fetches `<stem>.data.zz` automatically and decompresses it in the
@@ -115,74 +115,7 @@ function export_interactive_tracks_html(
         error("Either `trajectories` or `runs_data` must be provided to `export_interactive_tracks_html`.")
     end
 
-    # 2. Extract Management Strata and Centroids
-    strata_list = if isnothing(strata_definitions)
-        auto_polys = load_cfa_polygons("inputs")
-        if !isempty(auto_polys)
-            [
-                (
-                    name = string(s.name),
-                    color = s.color,
-                    is_polygon = true,
-                    polygon = s.coordinates,
-                    lon_min = s.lon[1],
-                    lon_max = s.lon[2],
-                    lat_min = s.lat[1],
-                    lat_max = s.lat[2],
-                    centroid_lat = mean([pt[1] for pt in s.coordinates]),
-                    centroid_lon = mean([pt[2] for pt in s.coordinates])
-                ) for s in auto_polys
-            ]
-        else
-            [
-                (name = "CFA 20-22 (Eastern NS)", color = "#3B82F6", is_polygon = false, polygon = Any[], lon_min = -62.0, lon_max = -57.0, lat_min = 44.5, lat_max = 47.5, centroid_lat = 46.0, centroid_lon = -59.5),
-                (name = "CFA 23-24 (Middle Shelf)", color = "#10B981", is_polygon = false, polygon = Any[], lon_min = -64.5, lon_max = -60.0, lat_min = 43.0, lat_max = 45.5, centroid_lat = 44.25, centroid_lon = -62.25),
-                (name = "CFA 4X (Southwest NS)", color = "#F59E0B", is_polygon = false, polygon = Any[], lon_min = -67.5, lon_max = -63.5, lat_min = 42.0, lat_max = 44.5, centroid_lat = 43.25, centroid_lon = -65.5),
-                (name = "Offshore / Slope", color = "#8B5CF6", is_polygon = false, polygon = Any[], lon_min = -68.0, lon_max = -57.0, lat_min = 41.5, lat_max = 43.0, centroid_lat = 42.25, centroid_lon = -62.5)
-            ]
-        end
-    else
-        [
-            (
-                name = string(s.name),
-                color = hasproperty(s, :color) ? string(s.color) : "#3B82F6",
-                is_polygon = hasproperty(s, :coordinates) && length(s.coordinates) >= 3,
-                polygon = hasproperty(s, :coordinates) ? s.coordinates :
-                          (hasproperty(s, :lons) && hasproperty(s, :lats) ? [[s.lats[i], s.lons[i]] for i in 1:length(s.lons)] : Any[]),
-                lon_min = hasproperty(s, :lon) ? Float64(s.lon[1]) : (hasproperty(s, :lon_min) ? Float64(s.lon_min) : -68.0),
-                lon_max = hasproperty(s, :lon) ? Float64(s.lon[2]) : (hasproperty(s, :lon_max) ? Float64(s.lon_max) : -57.0),
-                lat_min = hasproperty(s, :lat) ? Float64(s.lat[1]) : (hasproperty(s, :lat_min) ? Float64(s.lat_min) : 42.0),
-                lat_max = hasproperty(s, :lat) ? Float64(s.lat[2]) : (hasproperty(s, :lat_max) ? Float64(s.lat_max) : 47.0),
-                centroid_lat = hasproperty(s, :coordinates) && !isempty(s.coordinates) ? mean([pt[1] for pt in s.coordinates]) : (hasproperty(s, :lat) ? (s.lat[1]+s.lat[2])/2.0 : 44.0),
-                centroid_lon = hasproperty(s, :coordinates) && !isempty(s.coordinates) ? mean([pt[2] for pt in s.coordinates]) : (hasproperty(s, :lon) ? (s.lon[1]+s.lon[2])/2.0 : -63.0)
-            ) for s in strata_definitions
-        ]
-    end
-
-    strata_json_entries = String[]
-    for s in strata_list
-        poly_str = if s.is_polygon && !isempty(s.polygon)
-            "[" * join(["[$(pt[1]),$(pt[2])]" for pt in s.polygon], ",") * "]"
-        else
-            "[]"
-        end
-        s_entry = """{
-            "name": "$(s.name)",
-            "color": "$(s.color)",
-            "is_polygon": $(s.is_polygon),
-            "polygon": $(poly_str),
-            "lon_min": $(s.lon_min),
-            "lon_max": $(s.lon_max),
-            "lat_min": $(s.lat_min),
-            "lat_max": $(s.lat_max),
-            "centroid_lat": $(s.centroid_lat),
-            "centroid_lon": $(s.centroid_lon)
-        }"""
-        push!(strata_json_entries, s_entry)
-    end
-    strata_json = "[" * join(strata_json_entries, ",\n") * "]"
-
-    # 3. Serialize each run
+    # 2. Serialize each run
     run_json_blocks = String[]
     for (run_key, run_data) in runs_dict
         trajs = canonicalize_trajectories(run_data.trajectories)
@@ -251,16 +184,6 @@ function export_interactive_tracks_html(
         end
         particles_json = "[" * join(p_entries, ",\n") * "]"
 
-        # Statistics
-        n_settled = count(==("settled_successful"), statuses)
-        n_alive = count(identity, alive)
-        settle_pct = n_p > 0 ? round(100.0 * n_settled / n_p, digits = 1) : 0.0
-        survival_pct = n_p > 0 ? round(100.0 * n_alive / n_p, digits = 1) : 0.0
-        finite_ages = filter(isfinite, [Float64(a) / 86400.0 for a in ages])
-        mean_pld = isempty(finite_ages) ? 0.0 : round(mean(finite_ages), digits = 1)
-        finite_temps = filter(isfinite, vec(temps))
-        mean_temp_val = isempty(finite_temps) ? 0.0 : round(mean(finite_temps), digits = 2)
-
         # Gridded settlement density, velocity quivers, and thermal field
         g_disp = run_data.gridded_dispersal
         dens_entries = String[]
@@ -310,54 +233,14 @@ function export_interactive_tracks_html(
             end
         end
 
-        # Demographic connectivity flows
-        conn = run_data.connectivity
-        flow_entries = String[]
-        if !isnothing(conn) && hasproperty(conn, :matrix) && hasproperty(conn, :strata_names)
-            mat = conn.matrix
-            s_names = conn.strata_names
-            n_st = length(s_names)
-
-            c_map = Dict(s.name => (s.centroid_lat, s.centroid_lon) for s in strata_list)
-
-            for i in 1:n_st, j in 1:n_st
-                p_ij = Float64(mat[i, j])
-                if p_ij > 0.005
-                    src_n = s_names[i]
-                    dst_n = s_names[j]
-                    src_c = get(c_map, src_n, (44.0, -63.0))
-                    dst_c = get(c_map, dst_n, (44.0, -63.0))
-                    push!(flow_entries, """{
-                        "src": "$(src_n)",
-                        "dst": "$(dst_n)",
-                        "src_lat": $(round(src_c[1], digits=4)),
-                        "src_lon": $(round(src_c[2], digits=4)),
-                        "dst_lat": $(round(dst_c[1], digits=4)),
-                        "dst_lon": $(round(dst_c[2], digits=4)),
-                        "prob": $(round(p_ij, digits=3))
-                    }""")
-                end
-            end
-        end
-
         run_json = """
         "$(run_key)": {
             "name": "$(run_key)",
             "times": [$(join(t_days, ","))],
-            "stats": {
-                "n_particles": $(n_p),
-                "n_settled": $(n_settled),
-                "n_alive": $(n_alive),
-                "settle_pct": $(settle_pct),
-                "survival_pct": $(survival_pct),
-                "mean_pld_days": $(mean_pld),
-                "mean_temp": $(mean_temp_val)
-            },
             "particles": $(particles_json),
             "settlement_density": [$(join(dens_entries, ","))],
             "velocity_quivers": [$(join(quiver_entries, ","))],
-            "thermal_field": [$(join(therm_entries, ","))],
-            "connectivity_flows": [$(join(flow_entries, ","))]
+            "thermal_field": [$(join(therm_entries, ","))]
         }
         """
         push!(run_json_blocks, run_json)
@@ -514,38 +397,51 @@ function export_interactive_tracks_html(
             position: relative;
             flex: 1;
             display: flex;
+            flex-direction: row;
             width: 100%;
             height: calc(100vh - 60px);
+            overflow: hidden;
         }
 
+        #left-sidebar {
+            width: 310px;
+            flex-shrink: 0;
+            height: 100%;
+            overflow-y: auto;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            background: rgba(11, 15, 25, 0.96);
+            border-right: 1px solid var(--panel-border);
+            z-index: 1000;
+        }
+
+        #left-sidebar::-webkit-scrollbar { width: 5px; }
+        #left-sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+
         #map {
-            width: 100%;
+            flex: 1;
+            min-width: 0;
             height: 100%;
             background: #080d1a;
         }
 
         .floating-panel {
-            position: absolute;
+            position: relative;
+            width: 100%;
             background: var(--panel-bg);
             backdrop-filter: blur(16px);
             border: 1px solid var(--panel-border);
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
-            z-index: 1000;
-            padding: 14px;
+            border-radius: 10px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+            padding: 12px;
             transition: all 0.2s ease;
         }
 
         #layer-manager-dock {
-            top: 20px;
-            right: 20px;
-            width: 270px;
-            max-height: calc(100vh - 200px);
-            overflow-y: auto;
+            width: 100%;
         }
-
-        #layer-manager-dock::-webkit-scrollbar { width: 4px; }
-        #layer-manager-dock::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
 
         .layer-group-title {
             font-size: 0.72rem;
@@ -589,9 +485,6 @@ function export_interactive_tracks_html(
         }
 
         #controls-dock {
-            top: 20px;
-            left: 20px;
-            width: 260px;
             display: flex;
             flex-direction: column;
             gap: 10px;
@@ -626,37 +519,33 @@ function export_interactive_tracks_html(
         }
 
         #playback-dock {
-            bottom: 24px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 90%;
-            max-width: 720px;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 8px;
         }
 
         .playback-controls {
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
             justify-content: space-between;
-            gap: 12px;
+            gap: 8px;
         }
 
-        .btn-group { display: flex; gap: 6px; }
+        .btn-group { display: flex; flex-wrap: wrap; gap: 5px; }
 
         .control-btn {
             background: rgba(255, 255, 255, 0.08);
             border: 1px solid var(--panel-border);
             color: #fff;
-            padding: 6px 14px;
+            padding: 5px 9px;
             border-radius: 6px;
-            font-size: 0.82rem;
+            font-size: 0.76rem;
             font-weight: 500;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 4px;
             transition: background 0.15s ease;
         }
 
@@ -670,15 +559,17 @@ function export_interactive_tracks_html(
 
         .time-display {
             font-family: var(--font-mono);
-            font-size: 0.88rem;
+            font-size: 0.76rem;
             color: #fff;
             background: rgba(0, 0, 0, 0.35);
-            padding: 4px 10px;
+            padding: 4px 8px;
             border-radius: 6px;
             border: 1px solid var(--panel-border);
+            width: 100%;
+            text-align: center;
         }
 
-        .slider-row { display: flex; align-items: center; gap: 12px; }
+        .slider-row { display: flex; align-items: center; gap: 8px; }
 
         input[type="range"] {
             flex: 1;
@@ -690,9 +581,6 @@ function export_interactive_tracks_html(
         }
 
         #hud-dock {
-            bottom: 24px;
-            right: 20px;
-            width: 260px;
             font-size: 0.78rem;
         }
 
@@ -708,9 +596,6 @@ function export_interactive_tracks_html(
         .hud-val { font-family: var(--font-mono); font-weight: 600; color: #fff; }
 
         #legend-dock {
-            bottom: 125px;
-            left: 20px;
-            width: 250px;
             padding: 10px 12px;
             font-size: 0.74rem;
         }
@@ -812,7 +697,7 @@ function export_interactive_tracks_html(
 <body>
     <header>
         <div class="header-title">
-            <h1>Larval <span>Dispersal</span> & Demographic Connectivity</h1>
+            <h1>Larval <span>Dispersal</span> Trajectories</h1>
             <div class="header-subtitle">Multi-Run Lagrangian Particle Tracking Dashboard (*Chionoecetes opilio*)</div>
         </div>
         <div class="header-controls">
@@ -820,136 +705,110 @@ function export_interactive_tracks_html(
                 <label for="run-select">Run:</label>
                 <select id="run-select" onchange="switchRun(this.value)"></select>
             </div>
-            <div class="metric-chips">
-                <div class="chip">
-                    <span class="chip-label">Cohort</span>
-                    <span class="chip-value" id="chip-cohort">-</span>
-                </div>
-                <div class="chip">
-                    <span class="chip-label">Settled</span>
-                    <span class="chip-value success" id="chip-settled">-</span>
-                </div>
-                <div class="chip">
-                    <span class="chip-label">Survival</span>
-                    <span class="chip-value" id="chip-survival">-</span>
-                </div>
-                <div class="chip">
-                    <span class="chip-label">Mean PLD</span>
-                    <span class="chip-value warning" id="chip-pld">-</span>
-                </div>
-            </div>
         </div>
     </header>
 
     <div id="workspace">
+        <aside id="left-sidebar">
+            <div class="floating-panel" id="controls-dock">
+                <div class="control-section">
+                    <h4>Particle Palette</h4>
+                    <select id="color-mode-select" class="control-select">
+                        <option value="stage">Larval Stage (Molting)</option>
+                        <option value="depth">Drift Depth (m)</option>
+                        <option value="temp">Ambient Temperature (°C)</option>
+                        <option value="dd">Cumulative Degree-Days</option>
+                    </select>
+                </div>
+
+                <div class="control-section">
+                    <h4>Larval Cohort Filter</h4>
+                    <select id="outcome-filter-select" class="control-select">
+                        <option value="all">All Particles</option>
+                        <option value="settled">Settled Successfully</option>
+                        <option value="pelagic">Remaining Pelagic</option>
+                        <option value="dead">Thermal Mortality (Dead)</option>
+                    </select>
+                </div>
+
+                <div class="control-section">
+                    <h4>Focus Particle</h4>
+                    <select id="particle-select" class="control-select">
+                        <option value="-1">Overview (All Larvae)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="floating-panel" id="playback-dock">
+                <div class="playback-controls">
+                    <div class="btn-group">
+                        <button class="control-btn" id="play-btn">▶ Play</button>
+                        <button class="control-btn" id="reset-btn">⏮ Reset</button>
+                        <button class="control-btn speed-btn active" data-speed="1">1x</button>
+                        <button class="control-btn speed-btn" data-speed="2">2x</button>
+                        <button class="control-btn speed-btn" data-speed="4">4x</button>
+                    </div>
+                    <div class="time-display" id="time-readout">Day 0.00 / 0.00 d</div>
+                </div>
+                <div class="slider-row">
+                    <input type="range" id="time-slider" min="0" max="0" value="0" step="1">
+                </div>
+            </div>
+
+            <div class="floating-panel" id="layer-manager-dock">
+                <div class="layer-group-title">🛰️ Lagrangian Tracking</div>
+                <div class="layer-toggle-group">
+                    <div class="layer-item">
+                        <label><input type="checkbox" id="layer-fulltracks" checked> 🛰️ Full Trajectories</label>
+                    </div>
+                    <div class="layer-item">
+                        <label><input type="checkbox" id="layer-progtrails" checked> ✨ Progressive Trails</label>
+                    </div>
+                    <div class="layer-item">
+                        <label><input type="checkbox" id="layer-heads" checked> 🔵 Active Larval Heads</label>
+                    </div>
+                    <div class="layer-item">
+                        <label><input type="checkbox" id="layer-release" checked> 🟢 Spawning Releases</label>
+                    </div>
+                    <div class="layer-item">
+                        <label><input type="checkbox" id="layer-settle" checked> 🔴 Settlement Sites</label>
+                    </div>
+                    <div class="layer-item">
+                        <label><input type="checkbox" id="layer-density"> 🔥 Nursery Settlement Density</label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="floating-panel" id="hud-dock">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <b style="color:var(--accent-blue);" id="telemetry-hud">Telemetry HUD</b>
+                    <span id="hud-id" style="font-family:var(--font-mono); color:#fff;">Overview</span>
+                </div>
+                <div class="hud-grid">
+                    <div class="hud-item"><span class="hud-label">Stage</span><span class="hud-val" id="hud-stage">-</span></div>
+                    <div class="hud-item"><span class="hud-label">Depth</span><span class="hud-val" id="hud-depth">-</span></div>
+                    <div class="hud-item"><span class="hud-label">Temp (T)</span><span class="hud-val" id="hud-temp">-</span></div>
+                    <div class="hud-item"><span class="hud-label">Degree-Days</span><span class="hud-val" id="hud-dd">-</span></div>
+                    <div class="hud-item"><span class="hud-label">Survival</span><span class="hud-val" id="hud-surv">-</span></div>
+                    <div class="hud-item"><span class="hud-label">Position</span><span class="hud-val" id="hud-pos">-</span></div>
+                </div>
+            </div>
+
+            <div class="floating-panel" id="legend-dock">
+                <div class="legend-header">
+                    <span id="legend-title">Nursery Settlement Density</span>
+                    <span id="legend-unit" style="font-family:var(--font-mono)">%</span>
+                </div>
+                <div class="legend-bar" id="legend-bar" style="background: linear-gradient(to right, #1e3a8a, #06b6d4, #f59e0b, #ef4444);"></div>
+                <div class="legend-labels">
+                    <span id="legend-min">0.0</span>
+                    <span id="legend-mid">50.0</span>
+                    <span id="legend-max">100.0</span>
+                </div>
+            </div>
+        </aside>
+
         <div id="map"></div>
-
-        <div class="floating-panel" id="controls-dock">
-            <div class="control-section">
-                <h4>Particle Palette</h4>
-                <select id="color-mode-select" class="control-select">
-                    <option value="stage">Larval Stage (Molting)</option>
-                    <option value="depth">Drift Depth (m)</option>
-                    <option value="temp">Ambient Temperature (°C)</option>
-                    <option value="dd">Cumulative Degree-Days</option>
-                </select>
-            </div>
-
-            <div class="control-section">
-                <h4>Larval Cohort Filter</h4>
-                <select id="outcome-filter-select" class="control-select">
-                    <option value="all">All Particles</option>
-                    <option value="settled">Settled Successfully</option>
-                    <option value="pelagic">Remaining Pelagic</option>
-                    <option value="dead">Thermal Mortality (Dead)</option>
-                </select>
-            </div>
-
-            <div class="control-section">
-                <h4>Focus Particle</h4>
-                <select id="particle-select" class="control-select">
-                    <option value="-1">Overview (All Larvae)</option>
-                </select>
-            </div>
-        </div>
-
-        <div class="floating-panel" id="layer-manager-dock">
-            <div class="layer-group-title">🛰️ Lagrangian Tracking</div>
-            <div class="layer-toggle-group">
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-fulltracks" checked> 🛰️ Full Trajectories</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-progtrails" checked> ✨ Progressive Trails</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-heads" checked> 🔵 Active Larval Heads</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-release" checked> 🟢 Spawning Releases</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-settle" checked> 🔴 Settlement Sites</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-density"> 🔥 Nursery Settlement Density</label>
-                </div>
-            </div>
-
-            <div class="layer-group-title">🏛️ Demographics & Zones</div>
-            <div class="layer-toggle-group">
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-strata" checked> 🗺️ CFA Management Zones</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-conn"> ↔️ CFA Connectivity Flows</label>
-                </div>
-            </div>
-        </div>
-
-        <div class="floating-panel" id="playback-dock">
-            <div class="playback-controls">
-                <div class="btn-group">
-                    <button class="control-btn" id="play-btn">▶ Play</button>
-                    <button class="control-btn" id="reset-btn">⏮ Reset</button>
-                    <button class="control-btn speed-btn active" data-speed="1">1x</button>
-                    <button class="control-btn speed-btn" data-speed="2">2x</button>
-                    <button class="control-btn speed-btn" data-speed="4">4x</button>
-                </div>
-                <div class="time-display" id="time-readout">Day 0.00 / 0.00 d</div>
-            </div>
-            <div class="slider-row">
-                <input type="range" id="time-slider" min="0" max="0" value="0" step="1">
-            </div>
-        </div>
-
-        <div class="floating-panel" id="hud-dock">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <b style="color:var(--accent-blue);" id="telemetry-hud">Telemetry HUD</b>
-                <span id="hud-id" style="font-family:var(--font-mono); color:#fff;">Overview</span>
-            </div>
-            <div class="hud-grid">
-                <div class="hud-item"><span class="hud-label">Stage</span><span class="hud-val" id="hud-stage">-</span></div>
-                <div class="hud-item"><span class="hud-label">Depth</span><span class="hud-val" id="hud-depth">-</span></div>
-                <div class="hud-item"><span class="hud-label">Temp (T)</span><span class="hud-val" id="hud-temp">-</span></div>
-                <div class="hud-item"><span class="hud-label">Degree-Days</span><span class="hud-val" id="hud-dd">-</span></div>
-                <div class="hud-item"><span class="hud-label">Survival</span><span class="hud-val" id="hud-surv">-</span></div>
-                <div class="hud-item"><span class="hud-label">Position</span><span class="hud-val" id="hud-pos">-</span></div>
-            </div>
-        </div>
-
-        <div class="floating-panel" id="legend-dock">
-            <div class="legend-header">
-                <span id="legend-title">Nursery Settlement Density</span>
-                <span id="legend-unit" style="font-family:var(--font-mono)">%</span>
-            </div>
-            <div class="legend-bar" id="legend-bar" style="background: linear-gradient(to right, #1e3a8a, #06b6d4, #f59e0b, #ef4444);"></div>
-            <div class="legend-labels">
-                <span id="legend-min">0.0</span>
-                <span id="legend-mid">50.0</span>
-                <span id="legend-max">100.0</span>
-            </div>
-        </div>
     </div>
 
     <div id="data-loader-overlay">
@@ -966,7 +825,6 @@ function export_interactive_tracks_html(
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script>
         const SIDECAR_FILE = "$(sidecar_name_js)";
-        const STRATA = $(strata_json);
         let RUNS = {};
         let activeRunKey = "$(default_run_key)";
         let currentRun = null;
@@ -982,31 +840,28 @@ function export_interactive_tracks_html(
 
         L.control.layers({ "ESRI Ocean": esriOcean, "CartoDB Dark": cartoDark }, null, { position: 'bottomleft' }).addTo(map);
 
-        // Management & Lagrangian Layers
-        const strataLayer = L.layerGroup().addTo(map);
+        // Lagrangian Layers
         const fullTracksLayer = L.layerGroup().addTo(map);
         const progressTracksLayer = L.layerGroup().addTo(map);
         const activeHeadsLayer = L.layerGroup().addTo(map);
         const releaseMarkersLayer = L.layerGroup().addTo(map);
         const settlementMarkersLayer = L.layerGroup().addTo(map);
         const settlementDensityLayer = L.layerGroup();
-        const connectivityFlowsLayer = L.layerGroup();
-
-        STRATA.forEach(s => {
-            let layer = s.is_polygon ? L.polygon(s.polygon, {color: s.color, weight: 2.2, fillOpacity: 0.08}) : L.rectangle([[s.lat_min, s.lon_min], [s.lat_max, s.lon_max]], {color: s.color, weight: 2, fillOpacity: 0.06});
-            layer.bindTooltip("<b>" + s.name + "</b>").addTo(strataLayer);
-        });
 
         const runSelect = document.getElementById('run-select');
 
         let currentStep = 0, isPlaying = false, playSpeed = 1, animTimer = null, showTrails = true, colorMode = "stage", outcomeFilter = "all", focusParticleId = -1;
         let headMarkers = [], fullTrackPolylines = [], progressTrackPolylines = [];
 
+        function isValidLatLng(lat, lon) {
+            return lat !== null && lon !== null && Number.isFinite(lat) && Number.isFinite(lon);
+        }
+
         function getColor(p, step) {
             if (colorMode === "stage") return STAGE_COLORS[p.stages[step]] || "#38bdf8";
-            if (colorMode === "depth") return Math.abs(p.depths[step]) < 50 ? "#38bdf8" : "#1e3a8a";
-            if (colorMode === "temp") return p.temps[step] < 6 ? "#38bdf8" : "#f87171";
-            return p.dds[step] < 100 ? "#38bdf8" : "#f97316";
+            if (colorMode === "depth") return (p.depths[step] !== null && Math.abs(p.depths[step]) < 50) ? "#38bdf8" : "#1e3a8a";
+            if (colorMode === "temp") return (p.temps[step] !== null && p.temps[step] < 6) ? "#38bdf8" : "#f87171";
+            return (p.dds[step] !== null && p.dds[step] < 100) ? "#38bdf8" : "#f97316";
         }
 
         function updateLegend(title, unit, minV, maxV, gradientCss) {
@@ -1020,7 +875,7 @@ function export_interactive_tracks_html(
 
         function renderActiveRun() {
             [fullTracksLayer, progressTracksLayer, activeHeadsLayer, releaseMarkersLayer,
-             settlementMarkersLayer, settlementDensityLayer, connectivityFlowsLayer].forEach(l => l.clearLayers());
+             settlementMarkersLayer, settlementDensityLayer].forEach(l => l.clearLayers());
 
             headMarkers = [];
             fullTrackPolylines = [];
@@ -1029,22 +884,29 @@ function export_interactive_tracks_html(
             const pList = currentRun.particles;
             const nTimes = currentRun.times.length;
 
-            // 1. Summary Chips
-            document.getElementById('chip-cohort').textContent = currentRun.stats.n_particles;
-            document.getElementById('chip-settled').textContent = `\${currentRun.stats.n_settled} (\${currentRun.stats.settle_pct}%)`;
-            document.getElementById('chip-survival').textContent = `\${currentRun.stats.survival_pct}%`;
-            document.getElementById('chip-pld').textContent = `\${currentRun.stats.mean_pld_days} d`;
-
-            // 2. Trajectories, Heads & Markers
+            // 1. Trajectories, Heads & Markers
             pList.forEach((p) => {
                 const fullLatLngs = [];
+                let firstValid = -1;
+                let lastValid = -1;
                 for (let t = 0; t < nTimes; t++) {
-                    fullLatLngs.push([p.lats[t], p.lons[t]]);
+                    if (isValidLatLng(p.lats[t], p.lons[t])) {
+                        if (firstValid === -1) firstValid = t;
+                        lastValid = t;
+                        fullLatLngs.push([p.lats[t], p.lons[t]]);
+                    }
+                }
+
+                if (firstValid === -1) {
+                    fullTrackPolylines.push(null);
+                    progressTrackPolylines.push(null);
+                    headMarkers.push(null);
+                    return;
                 }
 
                 // Full Polyline
                 const fullPoly = L.polyline(fullLatLngs, {
-                    color: getColor(p, nTimes - 1),
+                    color: getColor(p, lastValid),
                     weight: 2.2,
                     opacity: 0.55
                 }).on('click', () => selectParticle(p.id));
@@ -1052,8 +914,8 @@ function export_interactive_tracks_html(
                 fullTracksLayer.addLayer(fullPoly);
 
                 // Progress Polyline
-                const progPoly = L.polyline(fullLatLngs.slice(0, 2), {
-                    color: getColor(p, 0),
+                const progPoly = L.polyline(fullLatLngs.slice(0, Math.min(2, fullLatLngs.length)), {
+                    color: getColor(p, firstValid),
                     weight: 3.5,
                     opacity: 0.95
                 }).on('click', () => selectParticle(p.id));
@@ -1061,37 +923,36 @@ function export_interactive_tracks_html(
                 progressTracksLayer.addLayer(progPoly);
 
                 // Head Marker
-                const marker = L.circleMarker([p.lats[0], p.lons[0]], {
+                const marker = L.circleMarker([p.lats[firstValid], p.lons[firstValid]], {
                     radius: 5.5,
                     color: '#ffffff',
                     weight: 2,
-                    fillColor: getColor(p, 0),
+                    fillColor: getColor(p, firstValid),
                     fillOpacity: 1.0
                 }).on('click', () => selectParticle(p.id));
-                marker.bindTooltip(`<b>Larva #\${p.id}</b> (\${p.stages[0]})`, { sticky: true });
+                marker.bindTooltip(`<b>Larva #\${p.id}</b> (\${p.stages[firstValid]})`, { sticky: true });
                 headMarkers.push(marker);
                 activeHeadsLayer.addLayer(marker);
 
                 // Spawning Release Marker
-                const relMarker = L.circleMarker([p.lats[0], p.lons[0]], {
+                const relMarker = L.circleMarker([p.lats[firstValid], p.lons[firstValid]], {
                     radius: 4,
                     color: '#10b981',
                     fillColor: '#059669',
                     fillOpacity: 0.85,
                     weight: 1.5
-                }).bindPopup(`<b>Spawning Release #\${p.id}</b><br>Lon: \${p.lons[0].toFixed(3)}°E<br>Lat: \${p.lats[0].toFixed(3)}°N`);
+                }).bindPopup(`<b>Spawning Release #\${p.id}</b><br>Lon: \${p.lons[firstValid].toFixed(3)}°E<br>Lat: \${p.lats[firstValid].toFixed(3)}°N`);
                 releaseMarkersLayer.addLayer(relMarker);
 
                 // Settlement Marker (if settled)
                 if (p.status === "settled_successful") {
-                    const lastT = nTimes - 1;
-                    const setMarker = L.circleMarker([p.lats[lastT], p.lons[lastT]], {
+                    const setMarker = L.circleMarker([p.lats[lastValid], p.lons[lastValid]], {
                         radius: 6,
                         color: '#f59e0b',
                         fillColor: '#d97706',
                         fillOpacity: 0.9,
                         weight: 2
-                    }).bindPopup(`<b>Benthic Settlement Site #\${p.id}</b><br>Age: \${p.settlement_age_days} d<br>Lon: \${p.lons[lastT].toFixed(3)}°E<br>Lat: \${p.lats[lastT].toFixed(3)}°N`);
+                    }).bindPopup(`<b>Benthic Settlement Site #\${p.id}</b><br>Age: \${p.settlement_age_days} d<br>Lon: \${p.lons[lastValid].toFixed(3)}°E<br>Lat: \${p.lats[lastValid].toFixed(3)}°N`);
                     settlementMarkersLayer.addLayer(setMarker);
                 }
             });
@@ -1113,21 +974,7 @@ function export_interactive_tracks_html(
                 });
             }
 
-            // 5. Demographic Connectivity Flows
-            if (currentRun.connectivity_flows && currentRun.connectivity_flows.length > 0) {
-                currentRun.connectivity_flows.forEach(flow => {
-                    const weight = Math.max(2.0, flow.prob * 10.0);
-                    const flowLine = L.polyline([[flow.src_lat, flow.src_lon], [flow.dst_lat, flow.dst_lon]], {
-                        color: '#a855f7',
-                        weight: weight,
-                        opacity: 0.8,
-                        dashArray: '8, 4'
-                    }).bindTooltip(`<b>Connectivity Transition</b><br>\${flow.src} ➔ \${flow.dst}<br>Probability P_{ij}: \${(flow.prob * 100).toFixed(1)}%`);
-                    connectivityFlowsLayer.addLayer(flowLine);
-                });
-            }
-
-            // 6. Particle Selector Dropdown
+            // 3. Particle Selector Dropdown
             const pSelect = document.getElementById('particle-select');
             pSelect.innerHTML = '<option value="-1">Overview (All Larvae)</option>';
             pList.forEach(p => {
@@ -1200,17 +1047,23 @@ function export_interactive_tracks_html(
 
                 const lat = p.lats[step];
                 const lon = p.lons[step];
+                const hasPos = isValidLatLng(lat, lon);
                 const col = getColor(p, step);
 
                 if (headMarkers[idx]) {
-                    headMarkers[idx].setLatLng([lat, lon]);
-                    headMarkers[idx].setStyle({
-                        fillColor: col,
-                        opacity: 1,
-                        fillOpacity: 1,
-                        radius: (focusParticleId === p.id) ? 9 : 5.5
-                    });
-                    headMarkers[idx].setTooltipContent(`<b>Larva #\${p.id}</b> (\${p.stages[step]} • \${p.depths[step].toFixed(1)}m)`);
+                    if (hasPos) {
+                        headMarkers[idx].setLatLng([lat, lon]);
+                        headMarkers[idx].setStyle({
+                            fillColor: col,
+                            opacity: 1,
+                            fillOpacity: 1,
+                            radius: (focusParticleId === p.id) ? 9 : 5.5
+                        });
+                        const depthTxt = p.depths[step] !== null ? `\${p.depths[step].toFixed(1)}m` : '-';
+                        headMarkers[idx].setTooltipContent(`<b>Larva #\${p.id}</b> (\${p.stages[step]} • \${depthTxt})`);
+                    } else {
+                        headMarkers[idx].setStyle({ opacity: 0, fillOpacity: 0 });
+                    }
                 }
 
                 if (fullTrackPolylines[idx]) {
@@ -1225,18 +1078,31 @@ function export_interactive_tracks_html(
                     if (showTrails && step > 0) {
                         const progPts = [];
                         for (let t = 0; t <= step; t++) {
-                            progPts.push([p.lats[t], p.lons[t]]);
+                            if (isValidLatLng(p.lats[t], p.lons[t])) {
+                                progPts.push([p.lats[t], p.lons[t]]);
+                            }
                         }
-                        progressTrackPolylines[idx].setLatLngs(progPts);
-                        progressTrackPolylines[idx].setStyle({
-                            color: col,
-                            opacity: (focusParticleId === p.id) ? 1.0 : 0.95,
-                            weight: (focusParticleId === p.id) ? 4.5 : 3.2
-                        });
+                        if (progPts.length >= 2) {
+                            progressTrackPolylines[idx].setLatLngs(progPts);
+                            progressTrackPolylines[idx].setStyle({
+                                color: col,
+                                opacity: (focusParticleId === p.id) ? 1.0 : 0.95,
+                                weight: (focusParticleId === p.id) ? 4.5 : 3.2
+                            });
+                        } else {
+                            progressTrackPolylines[idx].setStyle({ opacity: 0 });
+                        }
                     } else if (showTrails && step === 0) {
-                        const initPts = [[p.lats[0], p.lons[0]], [p.lats[Math.min(1, nTimes - 1)], p.lons[Math.min(1, nTimes - 1)]]];
-                        progressTrackPolylines[idx].setLatLngs(initPts);
-                        progressTrackPolylines[idx].setStyle({ color: col, opacity: 0.9, weight: 3.0 });
+                        const initPts = [];
+                        if (isValidLatLng(p.lats[0], p.lons[0])) initPts.push([p.lats[0], p.lons[0]]);
+                        const t1 = Math.min(1, nTimes - 1);
+                        if (isValidLatLng(p.lats[t1], p.lons[t1])) initPts.push([p.lats[t1], p.lons[t1]]);
+                        if (initPts.length >= 2) {
+                            progressTrackPolylines[idx].setLatLngs(initPts);
+                            progressTrackPolylines[idx].setStyle({ color: col, opacity: 0.9, weight: 3.0 });
+                        } else {
+                            progressTrackPolylines[idx].setStyle({ opacity: 0 });
+                        }
                     } else {
                         progressTrackPolylines[idx].setStyle({ opacity: 0 });
                     }
@@ -1267,7 +1133,9 @@ function export_interactive_tracks_html(
             document.getElementById('particle-select').value = id;
             const p = currentRun.particles.find(item => item.id === id);
             if (p) {
-                map.setView([p.lats[currentStep], p.lons[currentStep]], 9);
+                if (isValidLatLng(p.lats[currentStep], p.lons[currentStep])) {
+                    map.setView([p.lats[currentStep], p.lons[currentStep]], 9);
+                }
                 updateHUD(p, currentStep);
             }
             updateFrame(currentStep);
@@ -1296,9 +1164,7 @@ function export_interactive_tracks_html(
             { id: 'layer-heads', layer: activeHeadsLayer },
             { id: 'layer-release', layer: releaseMarkersLayer },
             { id: 'layer-settle', layer: settlementMarkersLayer },
-            { id: 'layer-density', layer: settlementDensityLayer, onSelect: () => updateLegend("Nursery Settlement Density", "%", "0.0", "100.0", "linear-gradient(to right, #1e3a8a, #06b6d4, #f59e0b, #ef4444)") },
-            { id: 'layer-strata', layer: strataLayer },
-            { id: 'layer-conn', layer: connectivityFlowsLayer }
+            { id: 'layer-density', layer: settlementDensityLayer, onSelect: () => updateLegend("Nursery Settlement Density", "%", "0.0", "100.0", "linear-gradient(to right, #1e3a8a, #06b6d4, #f59e0b, #ef4444)") }
         ];
 
         layerControls.forEach(ctrl => {

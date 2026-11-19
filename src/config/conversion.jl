@@ -159,6 +159,7 @@ function configuration_to_options(config_dict::AbstractDict;
 
     n_parts   = Int(get_val("biology", "n_particles", 100))
     track_days = Float64(get_val("biology", "track_duration_days", 5.0))
+    hydro_start_days = Float64(get_val("biology", "hydro_start_days", 0.0))
     track_dt  = Float64(get_val("biology", "track_dt_seconds", 300.0))
     min_depth = Float64(get_val("biology", "min_seabed_depth", 100.0))
     diff_h    = Float64(get_val("biology", "diffusivity_h", 10.0))
@@ -430,6 +431,7 @@ function configuration_to_options(config_dict::AbstractDict;
                         Float64(max_current_speed) : nothing,
         n_particles = n_parts,
         track_duration = track_days * 86400.0,
+        hydro_start_days = hydro_start_days,
         track_dt = track_dt,
         diffusivity_h = diff_h,
         diffusivity_v = diff_v,
@@ -591,6 +593,7 @@ function options_to_configuration(opts::HydrodynamicOptions)::Dict{String, Any}
         "biology" => Dict{String, Any}(
             "n_particles" => opts.n_particles,
             "track_duration_days" => opts.track_duration / 86400.0,
+            "hydro_start_days" => opts.hydro_start_days,
             "track_dt_seconds" => opts.track_dt,
             "min_seabed_depth" => opts.min_seabed_depth,
             "buffer_km" => opts.buffer_km,

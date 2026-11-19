@@ -101,6 +101,7 @@ struct HydrodynamicOptions
     max_current_speed        :: Union{Nothing, Float64}
     n_particles              :: Int
     track_duration           :: Float64
+    hydro_start_days         :: Float64
     track_dt                 :: Float64
     diffusivity_h            :: Float64
     diffusivity_v            :: Float64
@@ -287,6 +288,7 @@ function HydrodynamicOptions(;
     max_current_speed     :: Union{Nothing, Real} = 3.0,
     n_particles           :: Int = 100,
     track_duration        :: Real = 86400.0 * 5,
+    hydro_start_days      :: Real = 0.0,
     track_dt              :: Real = 300.0,
     diffusivity_h         :: Real = 10.0,
     diffusivity_v         :: Real = 1e-4,
@@ -409,6 +411,7 @@ function HydrodynamicOptions(;
         (max_current_speed isa Real && max_current_speed > 0) ? Float64(max_current_speed) : nothing,
         n_particles,
         Float64(track_duration),
+        Float64(hydro_start_days),
         Float64(track_dt),
         Float64(diffusivity_h),
         Float64(diffusivity_v),

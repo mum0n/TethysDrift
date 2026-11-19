@@ -74,11 +74,17 @@ space and linear in time -- the contract `track_larval_cohort` expects of a velo
 """
 function build_flow_from_store(store::HydrodynamicStore;
                                max_snapshots::Int = typemax(Int),
+                               start_time::Real = -Inf,
                                span::Vector{Float64} = [0.0, 0.0])
     t = store.times
-    nt = length(t)
-    keep = nt <= max_snapshots ? collect(1:nt) :
-           sort(unique(round.(Int, range(1, stop = nt, length = max(2, max_snapshots)))))
+    valid_idx = findall(x -> x >= Float64(start_time), t)
+    isempty(valid_idx) && error(
+        "No hydrodynamic snapshots at or after start_time = $(start_time) s " *
+        "(store spans $(t[1]) .. $(t[end]) s)."
+    )
+    nt = length(valid_idx)
+    keep = nt <= max_snapshots ? valid_idx :
+           valid_idx[sort(unique(round.(Int, range(1, stop = nt, length = max(2, max_snapshots)))))]
     tsel = t[keep]
 
     lon = store.axes.lon; lat = store.axes.lat; z = store.axes.depth
@@ -138,7 +144,7 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
     rng = MersenneTwister(opts.seed)
 
     # The realized ocean simulation is a Tethys store, and the coupling between the two
-    # halves is that store's identity -- a path. GeoOceanModelRun.jl prints it as `--hydro-file`,
+    # halves is that store's identity -- a path. TethysFlowRun.jl prints it as `--hydro-file`,
     # which the CLI passes here on `opts.hydro_model_file`; nothing else carries it across, and
     # the ocean half's own configuration is never opened here. Its interior cell centres also
     # state the domain, so the spawn area and the advective field agree by construction.
@@ -163,7 +169,7 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
     catch err
         if opts.track_only
             error("--track-only needs a realized simulation to track through; none is at " *
-                  "$(location) ($(sprint(showerror, err))). Run GeoOceanModelRun.jl --hydro-only " *
+                  "$(location) ($(sprint(showerror, err))). Run TethysFlowRun.jl --hydro-only " *
                   "first, or pass --hydro-file=<store>.")
         end
         @warn "No Tethys store at $(location) ($(sprint(showerror, err))); " *
@@ -213,15 +219,24 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
     # cohort is tracked for this whole span and stops early only once every larva is dead or
     # settled, so the drift is never shorter than the model it is driven by. `build_flow_from_store`
     # writes the retained span back through `hydro_span`.
+    opts.hydro_start_days < 0.0 && error(
+        "hydro_start_days must be non-negative (got $(opts.hydro_start_days))."
+    )
     flow_interpolator = if !isnothing(store)
+        start_time_req = store.times[1] + opts.hydro_start_days * 86400.0
         println("Reading 4D simulated fields from the Tethys store at $(store.location) " *
-                "($(length(store.times)) interval(s))...")
+                "($(length(store.times)) interval(s), start offset = $(opts.hydro_start_days) d)...")
         try
             # Intervals are held in memory for the run: `track_larval_cohort` samples the field
             # many times a step, and re-reading a Zarr array per sample turns the step into I/O.
             # A production run stores thousands of snapshots, so `max_flow_snapshots` bounds how
             # many are held (evenly subsampled, endpoints kept) rather than silently stalling.
-            interp = build_flow_from_store(store; max_snapshots = opts.max_flow_snapshots, span = hydro_span)
+            interp = build_flow_from_store(
+                store;
+                max_snapshots = opts.max_flow_snapshots,
+                start_time = start_time_req,
+                span = hydro_span
+            )
             println("  retained span: $(round(hydro_span[1], digits = 1)) .. " *
                     "$(round(hydro_span[2], digits = 1)) s " *
                     "($(round((hydro_span[2] - hydro_span[1]) / 86400, digits = 2)) days)")
@@ -250,9 +265,12 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
         nothing
     end
 
+    # Align tracking clock t = 0 with the retained hydrodynamic origin hydro_span[1]
+    # (which includes any TethysFlow spinup offset plus opts.hydro_start_days).
+    hydro_t0 = hydro_span[1]
     flow_field_fn = if !isnothing(flow_interpolator)
         (lon, lat, z, t) -> begin
-            f = flow_interpolator(lon, lat, z, t)
+            f = flow_interpolator(lon, lat, z, t + hydro_t0)
             (f.u, f.v, f.w)
         end
     else
@@ -276,7 +294,7 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
 
     temp_field_fn = if !isnothing(flow_interpolator)
         (lon, lat, z, t) -> begin
-            f = flow_interpolator(lon, lat, z, t)
+            f = flow_interpolator(lon, lat, z, t + hydro_t0)
             f.T
         end
     else
@@ -311,12 +329,20 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
         coast_polys = nothing
     end
 
-    # Track over the full span of the hydrodynamic record. The cohort stops early by itself once
-    # every larva is dead or settled, so this is an upper bound the run only reaches if larvae
-    # persist. When there is no hydro file (analytical fallback or synthetic quick run) the
-    # configured pelagic larval duration is the only sensible horizon.
+    # Honor the configured track_duration_days (<= 0 uses the full remaining hydrodynamic
+    # span), capped to the available hydrodynamic span when a hydrodynamic store is loaded.
+    # The cohort still stops early once every larva is dead or settled.
     track_horizon = if !isnothing(flow_interpolator) && hydro_span[2] > hydro_span[1]
-        hydro_span[2] - hydro_span[1]
+        avail_span = hydro_span[2] - hydro_span[1]
+        if opts.track_duration <= 0.0
+            avail_span
+        else
+            if opts.track_duration > avail_span
+                @warn "Configured track_duration_days ($(opts.track_duration / 86400.0)) exceeds " *
+                      "available hydrodynamic span ($(avail_span / 86400.0) days); capping to available span."
+            end
+            min(opts.track_duration, avail_span)
+        end
     else
         opts.track_duration
     end
@@ -1145,8 +1171,7 @@ function run_segment_visualize(;
         export_interactive_tracks_html(
             html_path;
             runs_data = runs_bundle,
-            strata_definitions = cfa_defs,
-            title = "Scotian Shelf Snow Crab Larval Dispersal & Demographic Connectivity"
+            title = "Scotian Shelf Snow Crab Larval Dispersal Trajectories"
         )
     end
 

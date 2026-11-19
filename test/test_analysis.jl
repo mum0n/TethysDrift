@@ -234,12 +234,16 @@ using Zarr
             html_text = read(html_path, String)
             @test occursin("const SIDECAR_FILE = \"tracks.data.zz\";", html_text)
             @test !occursin("const RUNS = {", html_text)
+            @test !occursin("Demographics & Zones", html_text)
+            @test !occursin("const STRATA =", html_text)
             compressed = read(sidecar_path)
             @test length(compressed) >= 2 && compressed[1] == 0x78
             raw_json = String(Zarr.zuncompress(compressed, Zarr.ZlibCompressor(7), UInt8))
             parsed_runs = TethysDrift.JSON3.read(raw_json)
             first_run = first(values(parsed_runs))
             @test !haskey(first_run, :hydrodynamics)
+            @test !haskey(first_run, :stats)
+            @test !haskey(first_run, :connectivity_flows)
             @test length(first_run.particles) == size(res.lons, 1)
             @test length(first_run.times) == size(res.lons, 2)
 
@@ -268,6 +272,47 @@ using Zarr
             adv_path = joinpath(tmp, "advection.png")
             TethysDrift.plot_hydrodynamic_advection(hydro_snap; output_path = adv_path)
             @test isfile(adv_path)
+        end
+    end
+
+    @testset "Hydrodynamic time-origin alignment & snowcrab.toml" begin
+        snow_cfg = TethysDrift.configuration_to_options(
+            TethysDrift.load_config(joinpath(@__DIR__, "..", "configs", "snowcrab.toml"))
+        )
+        @test snow_cfg.track_duration ≈ 547.5 * 86400.0
+        @test snow_cfg.hydro_start_days == 0.0
+
+        mktempdir() do tmp
+            zpath = joinpath(tmp, "offset_hydro.zarr")
+            lons = [-64.0, -63.0]
+            lats = [44.0, 45.0]
+            depths = [-10.0, -50.0]
+            # Simulated post-spinup clock starting at day 7 (604800 s), daily for 3 days
+            times = [604800.0, 691200.0, 777600.0, 864000.0]
+            root = Zarr.zgroup(zpath)
+            _zput(g, name, arr) = (za = Zarr.zcreate(eltype(arr), g, name, size(arr)...); za[:] = arr)
+            _zput(root, "lon", lons)
+            _zput(root, "lat", lats)
+            _zput(root, "depth", depths)
+            _zput(root, "time", times)
+            u = zeros(Float32, 2, 2, 2, 4)
+            for m in 1:4
+                u[:, :, :, m] .= Float32(m)
+            end
+            _zput(root, "u", u)
+            _zput(root, "v", zeros(Float32, 2, 2, 2, 4))
+            _zput(root, "w", zeros(Float32, 2, 2, 2, 4))
+            _zput(root, "T", fill(5.0f0, 2, 2, 2, 4))
+
+            store = TethysDrift.open_hydrodynamics(zpath)
+            span = [0.0, 0.0]
+            interp = TethysDrift.build_flow_from_store(
+                store; start_time = times[1] + 86400.0, span = span
+            )
+            @test span[1] == 691200.0
+            @test span[2] == 864000.0
+            @test interp(-63.5, 44.5, -25.0, span[1]).u ≈ 2.0
+            @test interp(-63.5, 44.5, -25.0, span[1] + 43200.0).u ≈ 2.5
         end
     end
 end

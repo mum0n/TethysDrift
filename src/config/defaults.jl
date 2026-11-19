@@ -191,6 +191,7 @@ function get_default_configuration()::Dict{String, Any}
         "biology" => Dict{String, Any}(
             "n_particles" => 100,
             "track_duration_days" => 5.0,
+            "hydro_start_days" => 0.0,
             "track_dt_seconds" => 300.0,
             "min_seabed_depth" => 100.0,
             "buffer_km" => 100.0,
