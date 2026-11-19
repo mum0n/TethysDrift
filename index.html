@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scotian Shelf Snow Crab Larval Dispersal & Demographic Connectivity</title>
+    <title>Scotian Shelf Snow Crab Larval Dispersal Trajectories</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -140,8 +140,34 @@
             position: relative;
             flex: 1;
             display: flex;
+            flex-direction: row;
             width: 100%;
             height: calc(100vh - 60px);
+            overflow: hidden;
+        }
+
+        #left-sidebar {
+            width: 310px;
+            flex-shrink: 0;
+            height: 100%;
+            overflow-y: auto;
+            padding: 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            background: rgba(11, 15, 25, 0.96);
+            border-right: 1px solid var(--panel-border);
+            z-index: 1000;
+        }
+
+        #left-sidebar::-webkit-scrollbar { width: 5px; }
+        #left-sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 3px; }
+
+        #map-container {
+            position: relative;
+            flex: 1;
+            min-width: 0;
+            height: 100%;
         }
 
         #map {
@@ -150,28 +176,54 @@
             background: #080d1a;
         }
 
-        .floating-panel {
+        #map-topright-dock {
             position: absolute;
+            top: 14px;
+            right: 14px;
+            width: 235px;
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .legend-swatches {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px 8px;
+            margin-top: 4px;
+            font-size: 0.70rem;
+            color: var(--text-main);
+        }
+
+        .legend-swatch-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .legend-swatch-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .floating-panel {
+            position: relative;
+            width: 100%;
             background: var(--panel-bg);
             backdrop-filter: blur(16px);
             border: 1px solid var(--panel-border);
-            border-radius: 12px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
-            z-index: 1000;
-            padding: 14px;
+            border-radius: 10px;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+            padding: 12px;
             transition: all 0.2s ease;
         }
 
         #layer-manager-dock {
-            top: 20px;
-            right: 20px;
-            width: 270px;
-            max-height: calc(100vh - 200px);
-            overflow-y: auto;
+            width: 100%;
         }
-
-        #layer-manager-dock::-webkit-scrollbar { width: 4px; }
-        #layer-manager-dock::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.2); border-radius: 2px; }
 
         .layer-group-title {
             font-size: 0.72rem;
@@ -215,9 +267,6 @@
         }
 
         #controls-dock {
-            top: 20px;
-            left: 20px;
-            width: 260px;
             display: flex;
             flex-direction: column;
             gap: 10px;
@@ -252,37 +301,33 @@
         }
 
         #playback-dock {
-            bottom: 24px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 90%;
-            max-width: 720px;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 8px;
         }
 
         .playback-controls {
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
             justify-content: space-between;
-            gap: 12px;
+            gap: 8px;
         }
 
-        .btn-group { display: flex; gap: 6px; }
+        .btn-group { display: flex; flex-wrap: wrap; gap: 5px; }
 
         .control-btn {
             background: rgba(255, 255, 255, 0.08);
             border: 1px solid var(--panel-border);
             color: #fff;
-            padding: 6px 14px;
+            padding: 5px 9px;
             border-radius: 6px;
-            font-size: 0.82rem;
+            font-size: 0.76rem;
             font-weight: 500;
             cursor: pointer;
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 4px;
             transition: background 0.15s ease;
         }
 
@@ -296,15 +341,17 @@
 
         .time-display {
             font-family: var(--font-mono);
-            font-size: 0.88rem;
+            font-size: 0.76rem;
             color: #fff;
             background: rgba(0, 0, 0, 0.35);
-            padding: 4px 10px;
+            padding: 4px 8px;
             border-radius: 6px;
             border: 1px solid var(--panel-border);
+            width: 100%;
+            text-align: center;
         }
 
-        .slider-row { display: flex; align-items: center; gap: 12px; }
+        .slider-row { display: flex; align-items: center; gap: 8px; }
 
         input[type="range"] {
             flex: 1;
@@ -316,9 +363,6 @@
         }
 
         #hud-dock {
-            bottom: 24px;
-            right: 20px;
-            width: 260px;
             font-size: 0.78rem;
         }
 
@@ -334,9 +378,6 @@
         .hud-val { font-family: var(--font-mono); font-weight: 600; color: #fff; }
 
         #legend-dock {
-            bottom: 125px;
-            left: 20px;
-            width: 250px;
             padding: 10px 12px;
             font-size: 0.74rem;
         }
@@ -432,151 +473,330 @@
             cursor: pointer;
         }
 
+        #left-sidebar.collapsed {
+            display: none;
+        }
+
+        #sidebar-toggle-btn {
+            position: absolute;
+            top: 82px;
+            left: 10px;
+            z-index: 1000;
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            border-radius: 6px;
+            padding: 4px 8px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+        }
+
+        #sidebar-toggle-btn:hover { background: rgba(56, 189, 248, 0.25); }
+
+        .stage-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px 6px;
+            margin-top: 6px;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            font-family: var(--font-mono);
+            font-size: 0.66rem;
+            color: var(--text-muted);
+        }
+
+        .stage-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 2px 5px;
+            border-radius: 4px;
+            color: #fff;
+        }
+
+        #hud-sparkline-wrap {
+            display: none;
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        #hud-sparkline {
+            width: 100%;
+            height: 74px;
+            display: block;
+            background: rgba(0, 0, 0, 0.35);
+            border-radius: 6px;
+            border: 1px solid var(--panel-border);
+        }
+
+        .sparkline-legend {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.64rem;
+            color: var(--text-muted);
+            margin-top: 3px;
+        }
+
+        .inline-action-row {
+            display: flex;
+            gap: 6px;
+            margin-top: 4px;
+        }
+
+        .inline-action-row .control-btn {
+            flex: 1;
+            justify-content: center;
+        }
+
         .loader-btn:hover { background: rgba(56, 189, 248, 0.24); }
+
+        .info-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            font-size: 0.62rem;
+            font-weight: 700;
+            font-style: normal;
+            color: var(--accent-blue);
+            background: rgba(56, 189, 248, 0.14);
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            margin-left: 5px;
+            cursor: help;
+            vertical-align: middle;
+            text-transform: none;
+            letter-spacing: 0;
+        }
+
+        [data-tip] { cursor: help; }
+        button[data-tip], select[data-tip], input[data-tip], label[data-tip] { cursor: pointer; }
+        input[type="number"][data-tip] { cursor: text; }
+
+        #ui-tooltip {
+            position: fixed;
+            z-index: 3000;
+            max-width: 280px;
+            padding: 8px 10px;
+            border-radius: 8px;
+            background: rgba(8, 12, 20, 0.96);
+            border: 1px solid rgba(56, 189, 248, 0.45);
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.65);
+            color: #e6edf3;
+            font-size: 0.72rem;
+            line-height: 1.4;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.12s ease;
+        }
+
+        #ui-tooltip.visible { opacity: 1; }
     </style>
 </head>
 <body>
     <header>
         <div class="header-title">
-            <h1>Larval <span>Dispersal</span> & Demographic Connectivity</h1>
-            <div class="header-subtitle">Multi-Run Lagrangian Particle Tracking Dashboard (*Chionoecetes opilio*)</div>
-        </div>
-        <div class="header-controls">
-            <div class="run-selector-box">
-                <label for="run-select">Run:</label>
-                <select id="run-select" onchange="switchRun(this.value)"></select>
-            </div>
-            <div class="metric-chips">
-                <div class="chip">
-                    <span class="chip-label">Cohort</span>
-                    <span class="chip-value" id="chip-cohort">-</span>
-                </div>
-                <div class="chip">
-                    <span class="chip-label">Settled</span>
-                    <span class="chip-value success" id="chip-settled">-</span>
-                </div>
-                <div class="chip">
-                    <span class="chip-label">Survival</span>
-                    <span class="chip-value" id="chip-survival">-</span>
-                </div>
-                <div class="chip">
-                    <span class="chip-label">Mean PLD</span>
-                    <span class="chip-value warning" id="chip-pld">-</span>
-                </div>
-            </div>
+            <h1>Larval pelagic movement of snow crab, climatology <span id="header-date" style="font-family:var(--font-mono); color:var(--accent-blue); font-weight:500;">— 2020-01-01</span></h1>
         </div>
     </header>
 
     <div id="workspace">
-        <div id="map"></div>
+        <aside id="left-sidebar">
+            <div class="floating-panel" id="controls-dock">
+                <div class="control-section">
+                    <h4>Larval Cohort Filter <span class="info-badge" data-tip="Filter cohort by final simulation outcome. Suitable benthic settlement requires seabed depth 10–500 m and bottom temperature ≤ 7.0 °C. Unsuitable habitat (&lt; 10 m, &gt; 500 m, or T &gt; 7.0 °C) causes settlement mortality; pelagic larvae exceeding 84 d in a single stage incur an over-age mortality penalty.">i</span></h4>
+                    <select id="outcome-filter-select" class="control-select" data-tip="Filter visible trajectories by final fate: Settled Successfully (suitable habitat), Remaining Pelagic (still drifting at end), Mortality (Dead from unsuitable settlement habitat or over-age pelagic arrest), or Moved Off Domain (exited lateral boundary buffer).">
+                        <option value="all">All Particles</option>
+                        <option value="settled">Settled Successfully</option>
+                        <option value="pelagic">Remaining Pelagic</option>
+                        <option value="dead">Mortality (Dead)</option>
+                        <option value="off_domain">Moved Off Domain</option>
+                    </select>
+                </div>
 
-        <div class="floating-panel" id="controls-dock">
-            <div class="control-section">
-                <h4>Particle Palette</h4>
-                <select id="color-mode-select" class="control-select">
-                    <option value="stage">Larval Stage (Molting)</option>
-                    <option value="depth">Drift Depth (m)</option>
-                    <option value="temp">Ambient Temperature (°C)</option>
-                    <option value="dd">Cumulative Degree-Days</option>
-                </select>
+                <div class="control-section">
+                    <h4>Current Stage Filter <span class="info-badge" data-tip="Show only larvae in the selected life stage at the active playback timestep. Ecdysis follows TethysBio's Poisson-CDF daily hazard (270 degree-days per stage above −1.5 °C, h0 = 0.35 day⁻¹).">i</span></h4>
+                    <select id="stage-filter-select" class="control-select" data-tip="Restrict map display to larvae currently in the chosen developmental stage at the active timestep.">
+                        <option value="all">All Stages</option>
+                        <option value="egg">Egg (Unhatched)</option>
+                        <option value="zoea1">Zoea I</option>
+                        <option value="zoea2">Zoea II</option>
+                        <option value="megalopa">Megalopa</option>
+                        <option value="instar1_settled">Settled (Instar I)</option>
+                        <option value="dead">Dead</option>
+                        <option value="off_domain">Moved Off Domain</option>
+                    </select>
+                </div>
+
+                <div class="control-section">
+                    <h4>Focus Particle <span class="info-badge" data-tip="Isolate a single larva from the dropdown to inspect its full trajectory, live telemetry, and depth/temperature sparkline. Press Esc to return to Overview.">i</span></h4>
+                    <select id="particle-select" class="control-select" data-tip="Select an individual larva by ID to center on it and display its depth and temperature time-series sparkline.">
+                        <option value="-1">Overview (All Larvae)</option>
+                    </select>
+                </div>
+
+                <div class="control-section">
+                    <h4>Click-Map Nearest Releases <span class="info-badge" data-tip="Single-click anywhere on the map to isolate the n larvae released closest (great-circle distance) to that point. Tracks and live HUD metrics then report real-time radial divergence (mean and max spread from cluster centroid in km).">i</span></h4>
+                    <div class="slider-control-row">
+                        <span>Count (n)</span>
+                        <input type="number" id="nearest-n-input" class="control-select" style="width:68px; text-align:center;" min="1" max="50" value="5" data-tip="Number of nearest released crabs (1–50) to isolate on a single map click. Changing n immediately updates an active cluster.">
+                        <button class="control-btn" id="clear-cluster-btn" data-tip="Clear the active click-map release cluster and restore all tracks (shortcut: Esc).">Clear</button>
+                    </div>
+                    <div style="font-size:0.68rem; color:var(--text-muted); margin-top:4px; line-height:1.3;">
+                        Click the map to isolate the <i>n</i> nearest released crabs and inspect track divergence.
+                    </div>
+                </div>
+
+                <div class="control-section">
+                    <h4>Trail Length <span class="info-badge" data-tip="Controls how much recent history is drawn by the Progressive Trails layer behind each moving larval head.">i</span></h4>
+                    <select id="trail-window-select" class="control-select" data-tip="Full Trajectory draws from release to current time; 3–30 Days draws a moving trailing wake.">
+                        <option value="0">Full Trajectory</option>
+                        <option value="3">Last 3 Days</option>
+                        <option value="7">Last 7 Days</option>
+                        <option value="14">Last 14 Days</option>
+                        <option value="30">Last 30 Days</option>
+                    </select>
+                </div>
+
+                <div class="control-section">
+                    <h4>Track Opacity <span class="info-badge" data-tip="Adjusts transparency of background Full Trajectories (10%–100%). Lower alpha reduces visual clutter when overlapping many tracks.">i</span></h4>
+                    <div class="slider-control-row">
+                        <span>Alpha</span>
+                        <input type="range" id="track-opacity-slider" min="10" max="100" value="55" data-tip="Drag to adjust background trajectory opacity (10%–100%).">
+                        <span id="track-opacity-val" style="font-family:var(--font-mono)">55%</span>
+                    </div>
+                </div>
+
+                <div class="inline-action-row">
+                    <button class="control-btn" id="fit-view-btn" data-tip="Zoom and pan the map to fit the full spatial extent of all trajectories.">⌖ Reset View</button>
+                </div>
             </div>
 
-            <div class="control-section">
-                <h4>Larval Cohort Filter</h4>
-                <select id="outcome-filter-select" class="control-select">
-                    <option value="all">All Particles</option>
-                    <option value="settled">Settled Successfully</option>
-                    <option value="pelagic">Remaining Pelagic</option>
-                    <option value="dead">Thermal Mortality (Dead)</option>
-                </select>
-            </div>
-
-            <div class="control-section">
-                <h4>Focus Particle</h4>
-                <select id="particle-select" class="control-select">
-                    <option value="-1">Overview (All Larvae)</option>
-                </select>
-            </div>
-        </div>
-
-        <div class="floating-panel" id="layer-manager-dock">
-            <div class="layer-group-title">🛰️ Lagrangian Tracking</div>
-            <div class="layer-toggle-group">
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-fulltracks" checked> 🛰️ Full Trajectories</label>
+            <div class="floating-panel" id="playback-dock">
+                <div class="playback-controls">
+                    <div class="btn-group">
+                        <button class="control-btn" id="play-btn" data-tip="Play or pause trajectory animation (shortcut: Space).">▶ Play</button>
+                        <button class="control-btn" id="step-back-btn" data-tip="Step backward one output frame (shortcut: Left Arrow).">◀</button>
+                        <button class="control-btn" id="step-fwd-btn" data-tip="Step forward one output frame (shortcut: Right Arrow).">▶</button>
+                        <button class="control-btn" id="reset-btn" data-tip="Reset playback to Day 0 (initial spawning release).">⏮</button>
+                    </div>
+                    <div class="btn-group">
+                        <button class="control-btn speed-btn active" data-speed="1" data-tip="Advance 1 output step per animation tick.">1x</button>
+                        <button class="control-btn speed-btn" data-speed="2" data-tip="Advance 2 output steps per animation tick.">2x</button>
+                        <button class="control-btn speed-btn" data-speed="4" data-tip="Advance 4 output steps per animation tick.">4x</button>
+                        <button class="control-btn speed-btn" data-speed="8" data-tip="Advance 8 output steps per animation tick.">8x</button>
+                        <button class="control-btn speed-btn" data-speed="16" data-tip="Advance 16 output steps per animation tick.">16x</button>
+                    </div>
+                    <div class="time-display" id="time-readout" data-tip="Elapsed simulation time in days since spawning release (6-hour output cadence).">Day 0.00 / 0.00 d</div>
                 </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-progtrails" checked> ✨ Progressive Trails</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-heads" checked> 🔵 Active Larval Heads</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-release" checked> 🟢 Spawning Releases</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-settle" checked> 🔴 Settlement Sites</label>
-                </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-density"> 🔥 Nursery Settlement Density</label>
+                <div class="slider-row">
+                    <input type="range" id="time-slider" min="0" max="0" value="0" step="1" data-tip="Scrub through simulation time (release to end of tracking).">
                 </div>
             </div>
 
-            <div class="layer-group-title">🏛️ Demographics & Zones</div>
-            <div class="layer-toggle-group">
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-strata" checked> 🗺️ CFA Management Zones</label>
+            <div class="floating-panel" id="layer-manager-dock">
+                <div class="layer-group-title">Tracking Controls <span class="info-badge" data-tip="Toggle map layers. Larvae are released 0.5–3 m above the seabed on the continental shelf (50–300 m depth), ascend to 10 m, and perform stage-dependent Diel Vertical Migration (DVM) while advected by 3D ocean currents.">i</span></div>
+                <div class="layer-toggle-group">
+                    <div class="layer-item">
+                        <label data-tip="Complete release-to-end drift paths for all visible larvae, colored by the active Particle Palette."><input type="checkbox" id="layer-fulltracks"> Full Trajectories</label>
+                    </div>
+                    <div class="layer-item">
+                        <label data-tip="Animated trajectory segments up to the current playback time (clipped by the Trail Length setting)."><input type="checkbox" id="layer-progtrails" checked> Progressive Trails</label>
+                    </div>
+                    <div class="layer-item">
+                        <label data-tip="Current position of each visible larva at the active timestep. Hover any head for its ID and stage."><input type="checkbox" id="layer-heads"> Active Larval Heads</label>
+                    </div>
+                    <div class="layer-item">
+                        <label data-tip="Initial spawning release sites on the continental shelf (50–300 m seabed depth; green triangles). Click a marker for coordinates."><input type="checkbox" id="layer-release"> Spawning Releases</label>
+                    </div>
+                    <div class="layer-item">
+                        <label data-tip="Locations where competent megalopae successfully settled in suitable benthic habitat (10–500 m seabed depth, bottom T ≤ 7.0 °C; amber stars)."><input type="checkbox" id="layer-settle"> Settlement Sites</label>
+                    </div>
                 </div>
-                <div class="layer-item">
-                    <label><input type="checkbox" id="layer-conn"> ↔️ CFA Connectivity Flows</label>
+            </div>
+
+            <div class="floating-panel" id="hud-dock">
+                <div style="display:flex; justify-content:space-between; align-items:center; gap:6px;">
+                    <b style="color:var(--accent-blue);" id="telemetry-hud">Telemetry HUD <span class="info-badge" data-tip="Displays live state for a focused larva, cursor coordinates in Overview mode, or real-time radial divergence metrics when a click-map cluster is active.">i</span></b>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                        <span id="hud-id" style="font-family:var(--font-mono); color:#fff;">Overview</span>
+                        <button class="control-btn" id="export-csv-btn" style="display:none; padding:2px 6px; font-size:0.68rem;" data-tip="Download the focused larva's full time series (time, lon, lat, depth, temp, degree-days, survival, stage) as CSV.">⬇ CSV</button>
+                    </div>
+                </div>
+                <div class="hud-grid">
+                    <div class="hud-item" data-tip="Current developmental stage: Zoea I, Zoea II, Megalopa, Settled (Instar I), or Dead."><span class="hud-label">Stage</span><span class="hud-val" id="hud-stage">-</span></div>
+                    <div class="hud-item" data-tip="Vertical depth below sea surface (m). Larvae perform stage-dependent Diel Vertical Migration (shallower at night, deeper by day)."><span class="hud-label">Depth</span><span class="hud-val" id="hud-depth">-</span></div>
+                    <div class="hud-item" data-tip="Ambient 3D ocean temperature (°C) interpolated at the larva's position and depth."><span class="hud-label">Temp (T)</span><span class="hud-val" id="hud-temp">-</span></div>
+                    <div class="hud-item" data-tip="Per-stage cumulative degree-days (°C·d above −1.5 °C; ~270 DD required per molt, reset at ecdysis). In Cluster mode, shows max initial release distance from the clicked point."><span class="hud-label">Degree-Days</span><span class="hud-val" id="hud-dd">-</span></div>
+                    <div class="hud-item" data-tip="Cumulative survival probability (pelagic baseline mortality is disabled; declines via over-age penalty past 84 d/stage or unsuitable settlement). In Cluster mode, shows mean radial spread from centroid (km)."><span class="hud-label">Survival</span><span class="hud-val" id="hud-surv">-</span></div>
+                    <div class="hud-item" data-tip="Geographic coordinates (°N, °E) at the active timestep. In Cluster mode, shows maximum radial spread from centroid (km)."><span class="hud-label">Position</span><span class="hud-val" id="hud-pos">-</span></div>
+                </div>
+                <div class="stage-strip" id="stage-counts-strip">
+                    <span class="stage-pill" data-tip="Zoea I count at active timestep (first pelagic stage; requires ≥ 36 d and ~270 DD to molt; DVM 10–50 m)."><span class="legend-swatch-dot" style="background:#38bdf8;"></span>Z1: <span id="cnt-z1">0</span></span>
+                    <span class="stage-pill" data-tip="Zoea II count at active timestep (second pelagic stage; requires ≥ 36 d and ~270 DD to molt; DVM 8–55 m)."><span class="legend-swatch-dot" style="background:#06b6d4;"></span>Z2: <span id="cnt-z2">0</span></span>
+                    <span class="stage-pill" data-tip="Megalopa count at active timestep (settlement-competent stage; requires ≥ 42 d and ~270 DD; DVM 60–120 m before descending to seabed)."><span class="legend-swatch-dot" style="background:#f97316;"></span>Meg: <span id="cnt-meg">0</span></span>
+                    <span class="stage-pill" data-tip="Settled (Instar I) count: megalopae that reached suitable benthic habitat (10–500 m depth, bottom T ≤ 7.0 °C)."><span class="legend-swatch-dot" style="background:#10b981;"></span>Set: <span id="cnt-set">0</span></span>
+                    <span class="stage-pill" data-tip="Dead count: mortality from settling in unsuitable habitat (depth &lt; 10 m or &gt; 500 m, or bottom T &gt; 7.0 °C) or pelagic over-age arrest (&gt; 84 d in a single stage)."><span class="legend-swatch-dot" style="background:#ef4444;"></span>Dead: <span id="cnt-dead">0</span></span>
+                    <span class="stage-pill" data-tip="Moved off domain: stopped tracking after entering the 25 km open-ocean lateral boundary buffer."><span class="legend-swatch-dot" style="background:#94a3b8;"></span>Off: <span id="cnt-off">0</span></span>
+                </div>
+                <div id="hud-sparkline-wrap" data-tip="Focused larva depth (blue, m) and ambient temperature (orange, °C) over time; vertical dashed line marks current playback timestep.">
+                    <canvas id="hud-sparkline" width="260" height="74"></canvas>
+                    <div class="sparkline-legend">
+                        <span style="color:#38bdf8;">— Depth (m)</span>
+                        <span style="color:#f97316;">— Temp (°C)</span>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <div class="floating-panel" id="playback-dock">
-            <div class="playback-controls">
-                <div class="btn-group">
-                    <button class="control-btn" id="play-btn">▶ Play</button>
-                    <button class="control-btn" id="reset-btn">⏮ Reset</button>
-                    <button class="control-btn speed-btn active" data-speed="1">1x</button>
-                    <button class="control-btn speed-btn" data-speed="2">2x</button>
-                    <button class="control-btn speed-btn" data-speed="4">4x</button>
+        </aside>
+
+        <div id="map-container">
+            <div id="map"></div>
+            <button id="sidebar-toggle-btn" data-tip="Collapse or expand the left control sidebar.">«</button>
+            <div class="floating-panel" id="map-topright-dock">
+                <div class="control-section">
+                    <h4>Particle Palette <span class="info-badge" data-tip="Select which state variable colors larval heads and trajectories: discrete developmental stage or continuous depth, temperature, or degree-days.">i</span></h4>
+                    <select id="color-mode-select" class="control-select" data-tip="Color larval heads and tracks by Stage, Drift Depth (0–200 m), Ambient Temperature (0–12 °C), or Degree-Days (0–270 DD).">
+                        <option value="stage">Larval Stage (Molting)</option>
+                        <option value="depth">Drift Depth (m)</option>
+                        <option value="temp">Ambient Temperature (°C)</option>
+                        <option value="dd">Cumulative Degree-Days</option>
+                    </select>
                 </div>
-                <div class="time-display" id="time-readout">Day 0.00 / 0.00 d</div>
-            </div>
-            <div class="slider-row">
-                <input type="range" id="time-slider" min="0" max="0" value="0" step="1">
-            </div>
-        </div>
 
-        <div class="floating-panel" id="hud-dock">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <b style="color:var(--accent-blue);" id="telemetry-hud">Telemetry HUD</b>
-                <span id="hud-id" style="font-family:var(--font-mono); color:#fff;">Overview</span>
-            </div>
-            <div class="hud-grid">
-                <div class="hud-item"><span class="hud-label">Stage</span><span class="hud-val" id="hud-stage">-</span></div>
-                <div class="hud-item"><span class="hud-label">Depth</span><span class="hud-val" id="hud-depth">-</span></div>
-                <div class="hud-item"><span class="hud-label">Temp (T)</span><span class="hud-val" id="hud-temp">-</span></div>
-                <div class="hud-item"><span class="hud-label">Degree-Days</span><span class="hud-val" id="hud-dd">-</span></div>
-                <div class="hud-item"><span class="hud-label">Survival</span><span class="hud-val" id="hud-surv">-</span></div>
-                <div class="hud-item"><span class="hud-label">Position</span><span class="hud-val" id="hud-pos">-</span></div>
-            </div>
-        </div>
-
-        <div class="floating-panel" id="legend-dock">
-            <div class="legend-header">
-                <span id="legend-title">Nursery Settlement Density</span>
-                <span id="legend-unit" style="font-family:var(--font-mono)">%</span>
-            </div>
-            <div class="legend-bar" id="legend-bar" style="background: linear-gradient(to right, #1e3a8a, #06b6d4, #f59e0b, #ef4444);"></div>
-            <div class="legend-labels">
-                <span id="legend-min">0.0</span>
-                <span id="legend-mid">50.0</span>
-                <span id="legend-max">100.0</span>
+                <div id="legend-dock">
+                    <div class="legend-header">
+                        <span id="legend-title">Larval Stage</span>
+                        <span id="legend-unit" style="font-family:var(--font-mono)"></span>
+                    </div>
+                    <div id="legend-gradient-wrap" style="display:none;">
+                        <div class="legend-bar" id="legend-bar" style="background: linear-gradient(to right, #1e3a8a, #06b6d4, #f59e0b, #ef4444);"></div>
+                        <div class="legend-labels">
+                            <span id="legend-min">0.0</span>
+                            <span id="legend-mid">50.0</span>
+                            <span id="legend-max">100.0</span>
+                        </div>
+                    </div>
+                    <div class="legend-swatches" id="legend-swatches">
+                        <div class="legend-swatch-item" data-tip="Egg (unhatched): stationary on the seabed until temperature-dependent brooding finishes (TethysBio brood rule)."><span class="legend-swatch-dot" style="background:#a855f7;"></span>Egg</div>
+                        <div class="legend-swatch-item" data-tip="Zoea I: first pelagic stage (~270 DD above −1.5 °C; Poisson-CDF transition hazard; DVM 10–50 m)."><span class="legend-swatch-dot" style="background:#38bdf8;"></span>Zoea I</div>
+                        <div class="legend-swatch-item" data-tip="Zoea II: second pelagic stage (≥ 36 d, ~270 DD above −1.5 °C; DVM 8–55 m)."><span class="legend-swatch-dot" style="background:#06b6d4;"></span>Zoea II</div>
+                        <div class="legend-swatch-item" data-tip="Megalopa: pre-settlement stage (≥ 42 d, ~270 DD; DVM 60–120 m before testing seabed habitat)."><span class="legend-swatch-dot" style="background:#f97316;"></span>Megalopa</div>
+                        <div class="legend-swatch-item" data-tip="Settled (Instar I): successfully recruited to suitable benthic habitat (10–500 m depth, bottom T ≤ 7.0 °C)."><span class="legend-swatch-dot" style="background:#10b981;"></span>Settled</div>
+                        <div class="legend-swatch-item" data-tip="Dead: failed settlement in unsuitable habitat (depth &lt; 10 m or &gt; 500 m, or bottom T &gt; 7.0 °C) or pelagic over-age arrest (&gt; 84 d in a stage)."><span class="legend-swatch-dot" style="background:#ef4444;"></span>Dead</div>
+                        <div class="legend-swatch-item" data-tip="Moved off domain: tracking stopped upon entering the 25 km lateral domain boundary buffer."><span class="legend-swatch-dot" style="background:#94a3b8;"></span>Off Domain</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
+
+    <div id="ui-tooltip" role="tooltip"></div>
 
     <div id="data-loader-overlay">
         <div class="loader-card">
@@ -592,94 +812,106 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script>
         const SIDECAR_FILE = "interactive_larval_tracks.data.zz";
-        const STRATA = [{
-    "name": "CFA 20-22 (Eastern NS)",
-    "color": "#3B82F6",
-    "is_polygon": false,
-    "polygon": [],
-    "lon_min": -62.0,
-    "lon_max": -57.0,
-    "lat_min": 44.5,
-    "lat_max": 47.5,
-    "centroid_lat": 46.0,
-    "centroid_lon": -59.5
-},
-{
-    "name": "CFA 23-24 (Middle Shelf)",
-    "color": "#3B82F6",
-    "is_polygon": false,
-    "polygon": [],
-    "lon_min": -64.5,
-    "lon_max": -60.0,
-    "lat_min": 43.0,
-    "lat_max": 45.5,
-    "centroid_lat": 44.25,
-    "centroid_lon": -62.25
-},
-{
-    "name": "CFA 4X (Southwest NS)",
-    "color": "#3B82F6",
-    "is_polygon": false,
-    "polygon": [],
-    "lon_min": -68.0,
-    "lon_max": -64.0,
-    "lat_min": 42.0,
-    "lat_max": 44.5,
-    "centroid_lat": 43.25,
-    "centroid_lon": -66.0
-},
-{
-    "name": "Offshore / Slope",
-    "color": "#3B82F6",
-    "is_polygon": false,
-    "polygon": [],
-    "lon_min": -68.0,
-    "lon_max": -57.0,
-    "lat_min": 40.0,
-    "lat_max": 43.0,
-    "centroid_lat": 41.5,
-    "centroid_lon": -62.5
-}];
+        const START_DATE_UTC = Date.parse("2020-01-01T00:00:00Z");
         let RUNS = {};
+
+        function formatNominalDate(dayOffset) {
+            if (!Number.isFinite(START_DATE_UTC)) return "";
+            const d = new Date(START_DATE_UTC + dayOffset * 86400000);
+            const yyyy = d.getUTCFullYear();
+            const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+            const dd = String(d.getUTCDate()).padStart(2, '0');
+            return `${yyyy}-${mm}-${dd}`;
+        }
         let activeRunKey = "run";
         let currentRun = null;
 
         const STAGE_COLORS = {
+            "egg": "#a855f7",
             "zoea1": "#38bdf8", "zoea2": "#06b6d4", "zoea3": "#0d9488", "zoea4": "#eab308",
-            "megalopa": "#f97316", "instar1_settled": "#10b981", "dead": "#ef4444"
+            "megalopa": "#f97316", "instar1_settled": "#10b981", "dead": "#ef4444", "off_domain": "#94a3b8"
         };
 
-        const map = L.map('map', { center: [44.2, -62.5], zoom: 7 });
+        const map = L.map('map', { center: [44.2, -62.5], zoom: 7, preferCanvas: true });
         const esriOcean = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 13 }).addTo(map);
         const cartoDark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', { maxZoom: 19 });
 
         L.control.layers({ "ESRI Ocean": esriOcean, "CartoDB Dark": cartoDark }, null, { position: 'bottomleft' }).addTo(map);
+        L.control.scale({ metric: true, imperial: false, position: 'bottomright' }).addTo(map);
 
-        // Management & Lagrangian Layers
-        const strataLayer = L.layerGroup().addTo(map);
-        const fullTracksLayer = L.layerGroup().addTo(map);
+        // Tracking Layers (only Progressive Trails enabled by default)
+        const fullTracksLayer = L.layerGroup();
         const progressTracksLayer = L.layerGroup().addTo(map);
-        const activeHeadsLayer = L.layerGroup().addTo(map);
-        const releaseMarkersLayer = L.layerGroup().addTo(map);
-        const settlementMarkersLayer = L.layerGroup().addTo(map);
-        const settlementDensityLayer = L.layerGroup();
-        const connectivityFlowsLayer = L.layerGroup();
+        const activeHeadsLayer = L.layerGroup();
+        const releaseMarkersLayer = L.layerGroup();
+        const settlementMarkersLayer = L.layerGroup();
+        const clickPinLayer = L.layerGroup().addTo(map);
 
-        STRATA.forEach(s => {
-            let layer = s.is_polygon ? L.polygon(s.polygon, {color: s.color, weight: 2.2, fillOpacity: 0.08}) : L.rectangle([[s.lat_min, s.lon_min], [s.lat_max, s.lon_max]], {color: s.color, weight: 2, fillOpacity: 0.06});
-            layer.bindTooltip("<b>" + s.name + "</b>").addTo(strataLayer);
+        const releaseTriangleIcon = L.divIcon({
+            className: '',
+            html: '<svg width="8" height="8" viewBox="0 0 10 10" style="display:block;"><polygon points="5,1 9,9 1,9" fill="#10b981"/></svg>',
+            iconSize: [8, 8],
+            iconAnchor: [4, 4]
         });
 
-        const runSelect = document.getElementById('run-select');
+        const settlementStarIcon = L.divIcon({
+            className: '',
+            html: '<svg width="13" height="13" viewBox="0 0 24 24" style="display:block;"><polygon points="12,2 15,9 22,9.5 16.5,14 18.2,21 12,17.3 5.8,21 7.5,14 2,9.5 9,9" fill="#f59e0b"/></svg>',
+            iconSize: [13, 13],
+            iconAnchor: [6.5, 6.5]
+        });
 
-        let currentStep = 0, isPlaying = false, playSpeed = 1, animTimer = null, showTrails = true, colorMode = "stage", outcomeFilter = "all", focusParticleId = -1;
+        let currentStep = 0, isPlaying = false, playSpeed = 1, animTimer = null, showTrails = true;
+        let colorMode = "stage", outcomeFilter = "all", stageFilter = "all", focusParticleId = -1;
+        let trailWindowDays = 0, trackOpacity = 0.55;
+        let nearestCount = 5, nearestParticleIds = null, lastClickLatLng = null, lastClusterMaxDistKm = 0;
         let headMarkers = [], fullTrackPolylines = [], progressTrackPolylines = [];
+        let releaseMarkers = [], settlementMarkers = [];
+        let cachedTrackBounds = null;
+
+        function isValidLatLng(lat, lon) {
+            return lat !== null && lon !== null && Number.isFinite(lat) && Number.isFinite(lon);
+        }
+
+        function haversineKm(lat1, lon1, lat2, lon2) {
+            const R = 6371.0;
+            const toRad = Math.PI / 180.0;
+            const dLat = (lat2 - lat1) * toRad;
+            const dLon = (lon2 - lon1) * toRad;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(lat1 * toRad) * Math.cos(lat2 * toRad) *
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            return 2.0 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
+        }
+
+        function lerpColorStops(norm, stops) {
+            const t = Math.min(1.0, Math.max(0.0, norm));
+            const scaled = t * (stops.length - 1);
+            const i = Math.min(stops.length - 2, Math.floor(scaled));
+            const f = scaled - i;
+            const c0 = stops[i], c1 = stops[i + 1];
+            const r = Math.round(c0[0] + f * (c1[0] - c0[0]));
+            const g = Math.round(c0[1] + f * (c1[1] - c0[1]));
+            const b = Math.round(c0[2] + f * (c1[2] - c0[2]));
+            return `rgb(${r},${g},${b})`;
+        }
+
+        const DEPTH_STOPS = [[56, 189, 248], [30, 58, 138]];
+        const TEMP_STOPS  = [[56, 189, 248], [16, 185, 129], [245, 158, 11], [239, 68, 68]];
+        const DD_STOPS    = [[56, 189, 248], [168, 85, 247], [249, 115, 22]];
 
         function getColor(p, step) {
             if (colorMode === "stage") return STAGE_COLORS[p.stages[step]] || "#38bdf8";
-            if (colorMode === "depth") return Math.abs(p.depths[step]) < 50 ? "#38bdf8" : "#1e3a8a";
-            if (colorMode === "temp") return p.temps[step] < 6 ? "#38bdf8" : "#f87171";
-            return p.dds[step] < 100 ? "#38bdf8" : "#f97316";
+            if (colorMode === "depth") {
+                const d = p.depths[step];
+                return d !== null ? lerpColorStops(Math.abs(d) / 200.0, DEPTH_STOPS) : "#64748b";
+            }
+            if (colorMode === "temp") {
+                const v = p.temps[step];
+                return v !== null ? lerpColorStops(v / 12.0, TEMP_STOPS) : "#64748b";
+            }
+            const dd = p.dds[step];
+            return dd !== null ? lerpColorStops(dd / 270.0, DD_STOPS) : "#64748b";
         }
 
         function updateLegend(title, unit, minV, maxV, gradientCss) {
@@ -689,118 +921,126 @@
             document.getElementById('legend-max').textContent = maxV;
             document.getElementById('legend-mid').textContent = ((parseFloat(minV) + parseFloat(maxV)) / 2.0).toFixed(1);
             document.getElementById('legend-bar').style.background = gradientCss;
+            document.getElementById('legend-gradient-wrap').style.display = 'block';
+            document.getElementById('legend-swatches').style.display = 'none';
+        }
+
+        function updatePaletteLegend(mode) {
+            if (mode === "stage") {
+                document.getElementById('legend-title').textContent = "Larval Stage";
+                document.getElementById('legend-unit').textContent = "";
+                document.getElementById('legend-gradient-wrap').style.display = 'none';
+                document.getElementById('legend-swatches').style.display = 'grid';
+            } else if (mode === "depth") {
+                updateLegend("Drift Depth", "m", "0.0", "200.0", "linear-gradient(to right, #38bdf8, #1e3a8a)");
+            } else if (mode === "temp") {
+                updateLegend("Ambient Temperature", "°C", "0.0", "12.0", "linear-gradient(to right, #38bdf8, #10b981, #f59e0b, #ef4444)");
+            } else {
+                updateLegend("Degree-Days", "DD", "0.0", "270.0", "linear-gradient(to right, #38bdf8, #a855f7, #f97316)");
+            }
         }
 
         function renderActiveRun() {
             [fullTracksLayer, progressTracksLayer, activeHeadsLayer, releaseMarkersLayer,
-             settlementMarkersLayer, settlementDensityLayer, connectivityFlowsLayer].forEach(l => l.clearLayers());
+             settlementMarkersLayer, clickPinLayer].forEach(l => l.clearLayers());
 
             headMarkers = [];
             fullTrackPolylines = [];
             progressTrackPolylines = [];
+            releaseMarkers = [];
+            settlementMarkers = [];
+            nearestParticleIds = null;
+            lastClickLatLng = null;
+            lastClusterMaxDistKm = 0;
 
             const pList = currentRun.particles;
             const nTimes = currentRun.times.length;
 
-            // 1. Summary Chips
-            document.getElementById('chip-cohort').textContent = currentRun.stats.n_particles;
-            document.getElementById('chip-settled').textContent = `${currentRun.stats.n_settled} (${currentRun.stats.settle_pct}%)`;
-            document.getElementById('chip-survival').textContent = `${currentRun.stats.survival_pct}%`;
-            document.getElementById('chip-pld').textContent = `${currentRun.stats.mean_pld_days} d`;
-
-            // 2. Trajectories, Heads & Markers
+            // 1. Trajectories, Heads & Markers
             pList.forEach((p) => {
                 const fullLatLngs = [];
+                let firstValid = -1;
+                let lastValid = -1;
+                let prevLat = NaN, prevLon = NaN;
                 for (let t = 0; t < nTimes; t++) {
-                    fullLatLngs.push([p.lats[t], p.lons[t]]);
+                    if (isValidLatLng(p.lats[t], p.lons[t])) {
+                        if (firstValid === -1) firstValid = t;
+                        lastValid = t;
+                        if (p.lats[t] !== prevLat || p.lons[t] !== prevLon) {
+                            fullLatLngs.push([p.lats[t], p.lons[t]]);
+                            prevLat = p.lats[t];
+                            prevLon = p.lons[t];
+                        }
+                    }
                 }
 
-                // Full Polyline
+                p._firstValid = firstValid;
+
+                if (firstValid === -1) {
+                    fullTrackPolylines.push(null);
+                    progressTrackPolylines.push(null);
+                    headMarkers.push(null);
+                    releaseMarkers.push(null);
+                    settlementMarkers.push(null);
+                    return;
+                }
+
+                // Full Polyline (non-interactive so single map clicks always select nearest releases)
                 const fullPoly = L.polyline(fullLatLngs, {
-                    color: getColor(p, nTimes - 1),
+                    color: getColor(p, lastValid),
                     weight: 2.2,
-                    opacity: 0.55
-                }).on('click', () => selectParticle(p.id));
+                    opacity: 0.55,
+                    interactive: false
+                });
                 fullTrackPolylines.push(fullPoly);
                 fullTracksLayer.addLayer(fullPoly);
 
-                // Progress Polyline
-                const progPoly = L.polyline(fullLatLngs.slice(0, 2), {
-                    color: getColor(p, 0),
+                // Progress Polyline (non-interactive so single map clicks always select nearest releases)
+                const progPoly = L.polyline(fullLatLngs.slice(0, Math.min(2, fullLatLngs.length)), {
+                    color: getColor(p, firstValid),
                     weight: 3.5,
-                    opacity: 0.95
-                }).on('click', () => selectParticle(p.id));
+                    opacity: 0.95,
+                    interactive: false
+                });
                 progressTrackPolylines.push(progPoly);
                 progressTracksLayer.addLayer(progPoly);
 
-                // Head Marker
-                const marker = L.circleMarker([p.lats[0], p.lons[0]], {
+                // Head Marker (fill only, no outline; hover tooltip without intercepting map click)
+                const marker = L.circleMarker([p.lats[firstValid], p.lons[firstValid]], {
                     radius: 5.5,
-                    color: '#ffffff',
-                    weight: 2,
-                    fillColor: getColor(p, 0),
+                    stroke: false,
+                    weight: 0,
+                    fillColor: getColor(p, firstValid),
                     fillOpacity: 1.0
-                }).on('click', () => selectParticle(p.id));
-                marker.bindTooltip(`<b>Larva #${p.id}</b> (${p.stages[0]})`, { sticky: true });
+                });
+                marker.bindTooltip(`<b>Larva #${p.id}</b> (${p.stages[firstValid]})`, { sticky: true });
                 headMarkers.push(marker);
                 activeHeadsLayer.addLayer(marker);
 
-                // Spawning Release Marker
-                const relMarker = L.circleMarker([p.lats[0], p.lons[0]], {
-                    radius: 4,
-                    color: '#10b981',
-                    fillColor: '#059669',
-                    fillOpacity: 0.85,
-                    weight: 1.5
-                }).bindPopup(`<b>Spawning Release #${p.id}</b><br>Lon: ${p.lons[0].toFixed(3)}°E<br>Lat: ${p.lats[0].toFixed(3)}°N`);
+                // Spawning Release Marker (filled triangle, no outline)
+                const relMarker = L.marker([p.lats[firstValid], p.lons[firstValid]], {
+                    icon: releaseTriangleIcon,
+                    opacity: 0.9
+                }).on('click', (e) => L.DomEvent.stopPropagation(e))
+                  .bindPopup(`<b>Spawning Release #${p.id}</b><br>Lon: ${p.lons[firstValid].toFixed(3)}°E<br>Lat: ${p.lats[firstValid].toFixed(3)}°N`);
+                releaseMarkers.push(relMarker);
                 releaseMarkersLayer.addLayer(relMarker);
 
-                // Settlement Marker (if settled)
+                // Settlement Marker (filled star, no outline)
                 if (p.status === "settled_successful") {
-                    const lastT = nTimes - 1;
-                    const setMarker = L.circleMarker([p.lats[lastT], p.lons[lastT]], {
-                        radius: 6,
-                        color: '#f59e0b',
-                        fillColor: '#d97706',
-                        fillOpacity: 0.9,
-                        weight: 2
-                    }).bindPopup(`<b>Benthic Settlement Site #${p.id}</b><br>Age: ${p.settlement_age_days} d<br>Lon: ${p.lons[lastT].toFixed(3)}°E<br>Lat: ${p.lats[lastT].toFixed(3)}°N`);
+                    const setMarker = L.marker([p.lats[lastValid], p.lons[lastValid]], {
+                        icon: settlementStarIcon,
+                        opacity: 0.95
+                    }).on('click', (e) => L.DomEvent.stopPropagation(e))
+                      .bindPopup(`<b>Benthic Settlement Site #${p.id}</b><br>Age: ${p.settlement_age_days} d<br>Lon: ${p.lons[lastValid].toFixed(3)}°E<br>Lat: ${p.lats[lastValid].toFixed(3)}°N`);
+                    settlementMarkers.push(setMarker);
                     settlementMarkersLayer.addLayer(setMarker);
+                } else {
+                    settlementMarkers.push(null);
                 }
             });
 
-            // 3. Nursery Settlement Density Heatmap
-            if (currentRun.settlement_density && currentRun.settlement_density.length > 0) {
-                const maxDens = Math.max(...currentRun.settlement_density.map(d => d.density));
-                currentRun.settlement_density.forEach(d => {
-                    const norm = maxDens > 0 ? (d.density / maxDens) : 0.5;
-                    const col = norm > 0.66 ? '#ef4444' : norm > 0.33 ? '#f59e0b' : '#38bdf8';
-                    const rect = L.circle([d.lat, d.lon], {
-                        radius: 7000,
-                        color: col,
-                        fillColor: col,
-                        fillOpacity: 0.35 + norm * 0.45,
-                        weight: 1
-                    }).bindTooltip(`<b>Settlement Nursery Density</b><br>Probability: ${(d.density * 100).toFixed(2)}%`);
-                    settlementDensityLayer.addLayer(rect);
-                });
-            }
-
-            // 5. Demographic Connectivity Flows
-            if (currentRun.connectivity_flows && currentRun.connectivity_flows.length > 0) {
-                currentRun.connectivity_flows.forEach(flow => {
-                    const weight = Math.max(2.0, flow.prob * 10.0);
-                    const flowLine = L.polyline([[flow.src_lat, flow.src_lon], [flow.dst_lat, flow.dst_lon]], {
-                        color: '#a855f7',
-                        weight: weight,
-                        opacity: 0.8,
-                        dashArray: '8, 4'
-                    }).bindTooltip(`<b>Connectivity Transition</b><br>${flow.src} ➔ ${flow.dst}<br>Probability P_{ij}: ${(flow.prob * 100).toFixed(1)}%`);
-                    connectivityFlowsLayer.addLayer(flowLine);
-                });
-            }
-
-            // 6. Particle Selector Dropdown
+            // 3. Particle Selector Dropdown
             const pSelect = document.getElementById('particle-select');
             pSelect.innerHTML = '<option value="-1">Overview (All Larvae)</option>';
             pList.forEach(p => {
@@ -829,67 +1069,187 @@
                 }
             }
             if (Number.isFinite(minLat)) {
-                map.fitBounds([
+                cachedTrackBounds = [
                     [minLat - 0.25, minLon - 0.25],
                     [maxLat + 0.25, maxLon + 0.25]
-                ]);
+                ];
+                map.fitBounds(cachedTrackBounds);
             }
 
-            updateLegend("Nursery Settlement Density", "%", "0.0", "100.0", "linear-gradient(to right, #1e3a8a, #06b6d4, #f59e0b, #ef4444)");
+            updatePaletteLegend(colorMode);
             updateFrame(0);
         }
 
-        function switchRun(key) {
-            if (RUNS[key]) {
-                activeRunKey = key;
-                currentRun = RUNS[key];
-                isPlaying = false;
-                document.getElementById('play-btn').textContent = "▶ Play";
-                clearTimeout(animTimer);
-                renderActiveRun();
+        function fitAllTracks() {
+            if (cachedTrackBounds) {
+                map.fitBounds(cachedTrackBounds);
             }
+        }
+
+        function drawSparkline(p, step) {
+            const wrap = document.getElementById('hud-sparkline-wrap');
+            const canvas = document.getElementById('hud-sparkline');
+            if (!p) {
+                wrap.style.display = 'none';
+                return;
+            }
+            wrap.style.display = 'block';
+            const ctx = canvas.getContext('2d');
+            const W = canvas.width, H = canvas.height;
+            ctx.clearRect(0, 0, W, H);
+            const n = p.depths.length;
+            if (n < 2) return;
+
+            let maxDepth = 50.0, minT = Infinity, maxT = -Infinity;
+            for (let i = 0; i < n; i++) {
+                if (p.depths[i] !== null && Math.abs(p.depths[i]) > maxDepth) maxDepth = Math.abs(p.depths[i]);
+                if (p.temps[i] !== null) {
+                    if (p.temps[i] < minT) minT = p.temps[i];
+                    if (p.temps[i] > maxT) maxT = p.temps[i];
+                }
+            }
+            if (!Number.isFinite(minT)) { minT = 0; maxT = 12; }
+            const tRange = Math.max(1.0, maxT - minT);
+
+            // Depth curve (0 at top, maxDepth at bottom)
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            let started = false;
+            for (let i = 0; i < n; i++) {
+                if (p.depths[i] === null) { started = false; continue; }
+                const x = (i / (n - 1)) * (W - 8) + 4;
+                const y = (Math.abs(p.depths[i]) / maxDepth) * (H - 12) + 6;
+                if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
+            }
+            ctx.stroke();
+
+            // Temperature curve (maxT at top, minT at bottom)
+            ctx.strokeStyle = '#f97316';
+            ctx.lineWidth = 1.3;
+            ctx.beginPath();
+            started = false;
+            for (let i = 0; i < n; i++) {
+                if (p.temps[i] === null) { started = false; continue; }
+                const x = (i / (n - 1)) * (W - 8) + 4;
+                const y = (1.0 - (p.temps[i] - minT) / tRange) * (H - 12) + 6;
+                if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
+            }
+            ctx.stroke();
+
+            // Playhead vertical line
+            const px = (step / (n - 1)) * (W - 8) + 4;
+            ctx.strokeStyle = 'rgba(255,255,255,0.75)';
+            ctx.lineWidth = 1.0;
+            ctx.beginPath();
+            ctx.moveTo(px, 2);
+            ctx.lineTo(px, H - 2);
+            ctx.stroke();
+        }
+
+        function exportFocusedCsv() {
+            if (!currentRun || focusParticleId === -1) return;
+            const p = currentRun.particles.find(item => item.id === focusParticleId);
+            if (!p) return;
+            const rows = ["day,lon,lat,depth_m,temp_C,degree_days,survival,stage"];
+            for (let t = 0; t < currentRun.times.length; t++) {
+                rows.push([
+                    currentRun.times[t],
+                    p.lons[t] ?? "",
+                    p.lats[t] ?? "",
+                    p.depths[t] ?? "",
+                    p.temps[t] ?? "",
+                    p.dds[t] ?? "",
+                    p.survs[t] ?? "",
+                    p.stages[t] ?? ""
+                ].join(","));
+            }
+            const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `larva_${p.id}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
         }
 
         function updateFrame(step) {
             currentStep = step;
             const nTimes = currentRun.times.length;
             const pList = currentRun.particles;
+            const curDay = currentRun.times[step];
 
             document.getElementById('time-slider').value = step;
-            document.getElementById('time-readout').textContent = `Day ${currentRun.times[step].toFixed(2)} / ${currentRun.times[nTimes - 1].toFixed(2)} d`;
+            document.getElementById('time-readout').textContent = `Day ${(curDay + 1.0).toFixed(1)} / ${(currentRun.times[nTimes - 1] + 1.0).toFixed(1)} d`;
+            const hDateEl = document.getElementById('header-date');
+            if (hDateEl) hDateEl.textContent = `— ${formatNominalDate(curDay)}`;
+
+            // Determine start index for trailing wake window
+            let trailStartIdx = 0;
+            if (trailWindowDays > 0) {
+                const minDay = curDay - trailWindowDays;
+                while (trailStartIdx < step && currentRun.times[trailStartIdx] < minDay) {
+                    trailStartIdx++;
+                }
+            }
+
+            let cZ1 = 0, cZ2 = 0, cMeg = 0, cSet = 0, cDead = 0, cOff = 0;
 
             pList.forEach((p, idx) => {
-                const isFiltered = (outcomeFilter === "settled" && p.status !== "settled_successful") ||
-                                   (outcomeFilter === "pelagic" && p.status !== "pelagic") ||
-                                   (outcomeFilter === "dead" && p.alive);
+                const st = p.stages[step];
+                const isClusterIncluded = !nearestParticleIds || nearestParticleIds.has(p.id);
+                if (isClusterIncluded) {
+                    if (st === "zoea1") cZ1++;
+                    else if (st === "zoea2") cZ2++;
+                    else if (st === "megalopa") cMeg++;
+                    else if (st === "instar1_settled") cSet++;
+                    else if (st === "dead") cDead++;
+                    else if (st === "off_domain") cOff++;
+                }
+
+                const isOutcomeFiltered = (outcomeFilter === "settled" && p.status !== "settled_successful") ||
+                                          (outcomeFilter === "pelagic" && p.status !== "pelagic") ||
+                                          (outcomeFilter === "dead" && (p.alive || p.status === "off_domain")) ||
+                                          (outcomeFilter === "off_domain" && p.status !== "off_domain");
+                const isStageFiltered = (stageFilter !== "all" && st !== stageFilter);
                 const isFocused = focusParticleId === -1 || focusParticleId === p.id;
 
-                if (isFiltered || !isFocused) {
-                    if (headMarkers[idx]) headMarkers[idx].setStyle({ opacity: 0, fillOpacity: 0 });
+                if (isOutcomeFiltered || isStageFiltered || !isFocused || !isClusterIncluded) {
+                    if (headMarkers[idx]) headMarkers[idx].setStyle({ fillOpacity: 0 });
                     if (fullTrackPolylines[idx]) fullTrackPolylines[idx].setStyle({ opacity: 0 });
                     if (progressTrackPolylines[idx]) progressTrackPolylines[idx].setStyle({ opacity: 0 });
+                    if (releaseMarkers[idx]) releaseMarkers[idx].setOpacity(0);
+                    if (settlementMarkers[idx]) settlementMarkers[idx].setOpacity(0);
                     return;
                 }
 
+                if (releaseMarkers[idx]) releaseMarkers[idx].setOpacity(0.9);
+                if (settlementMarkers[idx]) settlementMarkers[idx].setOpacity(0.95);
+
                 const lat = p.lats[step];
                 const lon = p.lons[step];
+                const hasPos = isValidLatLng(lat, lon);
                 const col = getColor(p, step);
 
                 if (headMarkers[idx]) {
-                    headMarkers[idx].setLatLng([lat, lon]);
-                    headMarkers[idx].setStyle({
-                        fillColor: col,
-                        opacity: 1,
-                        fillOpacity: 1,
-                        radius: (focusParticleId === p.id) ? 9 : 5.5
-                    });
-                    headMarkers[idx].setTooltipContent(`<b>Larva #${p.id}</b> (${p.stages[step]} • ${p.depths[step].toFixed(1)}m)`);
+                    if (hasPos) {
+                        headMarkers[idx].setLatLng([lat, lon]);
+                        headMarkers[idx].setStyle({
+                            fillColor: col,
+                            fillOpacity: 1,
+                            radius: (focusParticleId === p.id) ? 9 : 5.5
+                        });
+                        const depthTxt = p.depths[step] !== null ? `${p.depths[step].toFixed(1)}m` : '-';
+                        headMarkers[idx].setTooltipContent(`<b>Larva #${p.id}</b> (${st} • ${depthTxt})`);
+                    } else {
+                        headMarkers[idx].setStyle({ fillOpacity: 0 });
+                    }
                 }
 
                 if (fullTrackPolylines[idx]) {
                     fullTrackPolylines[idx].setStyle({
                         color: col,
-                        opacity: (focusParticleId === p.id) ? 0.9 : 0.45,
+                        opacity: (focusParticleId === p.id) ? Math.min(1.0, trackOpacity + 0.35) : trackOpacity,
                         weight: (focusParticleId === p.id) ? 3.5 : 2.0
                     });
                 }
@@ -897,28 +1257,161 @@
                 if (progressTrackPolylines[idx]) {
                     if (showTrails && step > 0) {
                         const progPts = [];
-                        for (let t = 0; t <= step; t++) {
-                            progPts.push([p.lats[t], p.lons[t]]);
+                        let pLa = NaN, pLo = NaN;
+                        for (let t = trailStartIdx; t <= step; t++) {
+                            if (isValidLatLng(p.lats[t], p.lons[t]) && (p.lats[t] !== pLa || p.lons[t] !== pLo)) {
+                                progPts.push([p.lats[t], p.lons[t]]);
+                                pLa = p.lats[t];
+                                pLo = p.lons[t];
+                            }
                         }
-                        progressTrackPolylines[idx].setLatLngs(progPts);
-                        progressTrackPolylines[idx].setStyle({
-                            color: col,
-                            opacity: (focusParticleId === p.id) ? 1.0 : 0.95,
-                            weight: (focusParticleId === p.id) ? 4.5 : 3.2
-                        });
+                        if (progPts.length >= 2) {
+                            progressTrackPolylines[idx].setLatLngs(progPts);
+                            progressTrackPolylines[idx].setStyle({
+                                color: col,
+                                opacity: (focusParticleId === p.id) ? 1.0 : Math.min(1.0, trackOpacity + 0.35),
+                                weight: (focusParticleId === p.id) ? 4.5 : 3.2
+                            });
+                        } else {
+                            progressTrackPolylines[idx].setStyle({ opacity: 0 });
+                        }
                     } else if (showTrails && step === 0) {
-                        const initPts = [[p.lats[0], p.lons[0]], [p.lats[Math.min(1, nTimes - 1)], p.lons[Math.min(1, nTimes - 1)]]];
-                        progressTrackPolylines[idx].setLatLngs(initPts);
-                        progressTrackPolylines[idx].setStyle({ color: col, opacity: 0.9, weight: 3.0 });
+                        const initPts = [];
+                        if (isValidLatLng(p.lats[0], p.lons[0])) initPts.push([p.lats[0], p.lons[0]]);
+                        const t1 = Math.min(1, nTimes - 1);
+                        if (isValidLatLng(p.lats[t1], p.lons[t1])) initPts.push([p.lats[t1], p.lons[t1]]);
+                        if (initPts.length >= 2) {
+                            progressTrackPolylines[idx].setLatLngs(initPts);
+                            progressTrackPolylines[idx].setStyle({ color: col, opacity: Math.min(1.0, trackOpacity + 0.35), weight: 3.0 });
+                        } else {
+                            progressTrackPolylines[idx].setStyle({ opacity: 0 });
+                        }
                     } else {
                         progressTrackPolylines[idx].setStyle({ opacity: 0 });
                     }
                 }
             });
 
+            document.getElementById('cnt-z1').textContent = cZ1;
+            document.getElementById('cnt-z2').textContent = cZ2;
+            document.getElementById('cnt-meg').textContent = cMeg;
+            document.getElementById('cnt-set').textContent = cSet;
+            document.getElementById('cnt-dead').textContent = cDead;
+            const cntOffEl = document.getElementById('cnt-off');
+            if (cntOffEl) cntOffEl.textContent = cOff;
+
             if (focusParticleId !== -1) {
                 const p = pList.find(item => item.id === focusParticleId);
-                if (p) updateHUD(p, step);
+                if (p) {
+                    updateHUD(p, step);
+                    drawSparkline(p, step);
+                }
+            } else if (nearestParticleIds !== null) {
+                updateClusterHUD(pList, step);
+                drawSparkline(null, step);
+            } else {
+                drawSparkline(null, step);
+            }
+        }
+
+        function updateClusterHUD(pList, step) {
+            const pts = [];
+            let depthSum = 0, depthCnt = 0, tempSum = 0, tempCnt = 0;
+            for (const p of pList) {
+                if (!nearestParticleIds.has(p.id)) continue;
+                const la = p.lats[step], lo = p.lons[step];
+                if (isValidLatLng(la, lo)) pts.push([la, lo]);
+                if (p.depths[step] !== null && Number.isFinite(p.depths[step])) {
+                    depthSum += p.depths[step]; depthCnt++;
+                }
+                if (p.temps[step] !== null && Number.isFinite(p.temps[step])) {
+                    tempSum += p.temps[step]; tempCnt++;
+                }
+            }
+            let meanSpreadKm = 0, maxSpreadKm = 0;
+            if (pts.length > 0) {
+                let cLat = 0, cLon = 0;
+                for (const pt of pts) { cLat += pt[0]; cLon += pt[1]; }
+                cLat /= pts.length;
+                cLon /= pts.length;
+                let sumD = 0;
+                for (const pt of pts) {
+                    const d = haversineKm(cLat, cLon, pt[0], pt[1]);
+                    sumD += d;
+                    if (d > maxSpreadKm) maxSpreadKm = d;
+                }
+                meanSpreadKm = sumD / pts.length;
+            }
+            document.getElementById('hud-id').textContent = `Cluster (n=${nearestParticleIds.size})`;
+            document.getElementById('hud-stage').textContent = 'Click Divergence';
+            document.getElementById('hud-depth').textContent = depthCnt > 0 ? `${(depthSum / depthCnt).toFixed(1)} m` : '-';
+            document.getElementById('hud-temp').textContent = tempCnt > 0 ? `${(tempSum / tempCnt).toFixed(2)} °C` : '-';
+            document.getElementById('hud-dd').textContent = `Init ≤ ${lastClusterMaxDistKm.toFixed(1)} km`;
+            document.getElementById('hud-surv').textContent = `Mean ${meanSpreadKm.toFixed(1)} km`;
+            document.getElementById('hud-pos').textContent = `Max ${maxSpreadKm.toFixed(1)} km`;
+        }
+
+        function selectNearestReleases(latlng) {
+            if (!currentRun || !currentRun.particles || currentRun.particles.length === 0) return;
+            const inputEl = document.getElementById('nearest-n-input');
+            const parsed = parseInt(inputEl.value, 10);
+            const n = Math.max(1, Math.min(50, Number.isFinite(parsed) ? parsed : 5));
+            nearestCount = n;
+            inputEl.value = n;
+
+            const ranked = [];
+            for (const p of currentRun.particles) {
+                if (p._firstValid === undefined || p._firstValid < 0) continue;
+                const d = haversineKm(latlng.lat, latlng.lng, p.lats[p._firstValid], p.lons[p._firstValid]);
+                ranked.push({ id: p.id, distKm: d });
+            }
+            if (ranked.length === 0) return;
+            ranked.sort((a, b) => a.distKm - b.distKm);
+            const picked = ranked.slice(0, Math.min(n, ranked.length));
+
+            lastClickLatLng = latlng;
+            nearestParticleIds = new Set(picked.map(x => x.id));
+            lastClusterMaxDistKm = picked[picked.length - 1].distKm;
+
+            focusParticleId = -1;
+            document.getElementById('particle-select').value = -1;
+            document.getElementById('export-csv-btn').style.display = 'none';
+
+            clickPinLayer.clearLayers();
+            L.circle([latlng.lat, latlng.lng], {
+                radius: Math.max(500, lastClusterMaxDistKm * 1000),
+                color: '#facc15',
+                weight: 1.5,
+                dashArray: '5, 5',
+                fillColor: '#facc15',
+                fillOpacity: 0.06,
+                interactive: false
+            }).addTo(clickPinLayer);
+            L.circleMarker([latlng.lat, latlng.lng], {
+                radius: 6,
+                color: '#ffffff',
+                weight: 2,
+                fillColor: '#facc15',
+                fillOpacity: 0.95,
+                interactive: false
+            }).addTo(clickPinLayer);
+
+            updateFrame(currentStep);
+        }
+
+        function clearClusterSelection(redraw = true) {
+            nearestParticleIds = null;
+            lastClickLatLng = null;
+            lastClusterMaxDistKm = 0;
+            clickPinLayer.clearLayers();
+            if (redraw && currentRun) {
+                if (focusParticleId === -1) {
+                    document.getElementById('hud-id').textContent = 'Overview';
+                    ['hud-stage', 'hud-depth', 'hud-temp', 'hud-dd', 'hud-surv', 'hud-pos'].forEach(eid => {
+                        document.getElementById(eid).textContent = '-';
+                    });
+                }
+                updateFrame(currentStep);
             }
         }
 
@@ -936,12 +1429,23 @@
         }
 
         function selectParticle(id) {
+            clearClusterSelection(false);
             focusParticleId = id;
             document.getElementById('particle-select').value = id;
+            const csvBtn = document.getElementById('export-csv-btn');
             const p = currentRun.particles.find(item => item.id === id);
             if (p) {
-                map.setView([p.lats[currentStep], p.lons[currentStep]], 9);
+                csvBtn.style.display = 'inline-flex';
+                if (isValidLatLng(p.lats[currentStep], p.lons[currentStep])) {
+                    map.setView([p.lats[currentStep], p.lons[currentStep]], 9);
+                }
                 updateHUD(p, currentStep);
+            } else {
+                csvBtn.style.display = 'none';
+                document.getElementById('hud-id').textContent = 'Overview';
+                ['hud-stage', 'hud-depth', 'hud-temp', 'hud-dd', 'hud-surv', 'hud-pos'].forEach(eid => {
+                    document.getElementById(eid).textContent = '-';
+                });
             }
             updateFrame(currentStep);
         }
@@ -955,11 +1459,15 @@
             animTimer = setTimeout(playLoop, 60);
         }
 
-        // Cursor Coordinate Readout
+        // Cursor Coordinate Readout & Click-to-Select Nearest Releases
         map.on('mousemove', function(e) {
-            if (focusParticleId !== -1) return;
+            if (focusParticleId !== -1 || nearestParticleIds !== null) return;
             document.getElementById('hud-id').textContent =
                 `${e.latlng.lat.toFixed(2)}°N, ${e.latlng.lng.toFixed(2)}°E`;
+        });
+
+        map.on('click', function(e) {
+            selectNearestReleases(e.latlng);
         });
 
         // Layer Manager Event Listeners
@@ -968,10 +1476,7 @@
             { id: 'layer-progtrails', layer: progressTracksLayer },
             { id: 'layer-heads', layer: activeHeadsLayer },
             { id: 'layer-release', layer: releaseMarkersLayer },
-            { id: 'layer-settle', layer: settlementMarkersLayer },
-            { id: 'layer-density', layer: settlementDensityLayer, onSelect: () => updateLegend("Nursery Settlement Density", "%", "0.0", "100.0", "linear-gradient(to right, #1e3a8a, #06b6d4, #f59e0b, #ef4444)") },
-            { id: 'layer-strata', layer: strataLayer },
-            { id: 'layer-conn', layer: connectivityFlowsLayer }
+            { id: 'layer-settle', layer: settlementMarkersLayer }
         ];
 
         layerControls.forEach(ctrl => {
@@ -989,11 +1494,29 @@
         });
 
         // Controller Event Listeners
-        document.getElementById('play-btn').addEventListener('click', function() {
+        function togglePlay() {
             isPlaying = !isPlaying;
-            this.textContent = isPlaying ? "⏸ Pause" : "▶ Play";
+            document.getElementById('play-btn').textContent = isPlaying ? "⏸ Pause" : "▶ Play";
             if (isPlaying) playLoop();
             else clearTimeout(animTimer);
+        }
+
+        document.getElementById('play-btn').addEventListener('click', togglePlay);
+
+        document.getElementById('step-back-btn').addEventListener('click', function() {
+            if (!currentRun) return;
+            isPlaying = false;
+            document.getElementById('play-btn').textContent = "▶ Play";
+            clearTimeout(animTimer);
+            updateFrame(Math.max(0, currentStep - 1));
+        });
+
+        document.getElementById('step-fwd-btn').addEventListener('click', function() {
+            if (!currentRun) return;
+            isPlaying = false;
+            document.getElementById('play-btn').textContent = "▶ Play";
+            clearTimeout(animTimer);
+            updateFrame(Math.min(currentRun.times.length - 1, currentStep + 1));
         });
 
         document.getElementById('reset-btn').addEventListener('click', function() {
@@ -1017,6 +1540,7 @@
 
         document.getElementById('color-mode-select').addEventListener('change', function(e) {
             colorMode = e.target.value;
+            updatePaletteLegend(colorMode);
             updateFrame(currentStep);
         });
 
@@ -1025,20 +1549,129 @@
             updateFrame(currentStep);
         });
 
+        document.getElementById('stage-filter-select').addEventListener('change', function(e) {
+            stageFilter = e.target.value;
+            updateFrame(currentStep);
+        });
+
+        document.getElementById('trail-window-select').addEventListener('change', function(e) {
+            trailWindowDays = parseFloat(e.target.value);
+            updateFrame(currentStep);
+        });
+
+        document.getElementById('track-opacity-slider').addEventListener('input', function(e) {
+            trackOpacity = parseFloat(e.target.value) / 100.0;
+            document.getElementById('track-opacity-val').textContent = e.target.value + "%";
+            updateFrame(currentStep);
+        });
+
         document.getElementById('particle-select').addEventListener('change', function(e) {
             selectParticle(parseInt(e.target.value));
         });
 
-        async function decodeZlibJson(stream) {
+        document.getElementById('nearest-n-input').addEventListener('change', function(e) {
+            const parsed = parseInt(e.target.value, 10);
+            nearestCount = Math.max(1, Math.min(50, Number.isFinite(parsed) ? parsed : 5));
+            e.target.value = nearestCount;
+            if (lastClickLatLng !== null) {
+                selectNearestReleases(lastClickLatLng);
+            }
+        });
+
+        document.getElementById('clear-cluster-btn').addEventListener('click', function() {
+            clearClusterSelection(true);
+        });
+
+        document.getElementById('fit-view-btn').addEventListener('click', fitAllTracks);
+        document.getElementById('export-csv-btn').addEventListener('click', exportFocusedCsv);
+
+        document.getElementById('sidebar-toggle-btn').addEventListener('click', function() {
+            const sb = document.getElementById('left-sidebar');
+            const collapsed = sb.classList.toggle('collapsed');
+            this.textContent = collapsed ? "»" : "«";
+            setTimeout(() => map.invalidateSize(), 50);
+        });
+
+        // Keyboard shortcuts: Space (play/pause), Left/Right (step), Escape (overview)
+        document.addEventListener('keydown', function(e) {
+            if (!currentRun) return;
+            const tag = document.activeElement ? document.activeElement.tagName : "";
+            if (e.key === "Escape") {
+                selectParticle(-1);
+                return;
+            }
+            if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+            if (e.code === "Space") {
+                e.preventDefault();
+                togglePlay();
+            } else if (e.key === "ArrowLeft") {
+                e.preventDefault();
+                updateFrame(Math.max(0, currentStep - 1));
+            } else if (e.key === "ArrowRight") {
+                e.preventDefault();
+                updateFrame(Math.min(currentRun.times.length - 1, currentStep + 1));
+            }
+        });
+
+        // Floating hover tooltips for controls, info badges, layer toggles, and HUD metrics
+        (function initHoverTooltips() {
+            const tipEl = document.getElementById('ui-tooltip');
+            if (!tipEl) return;
+            let activeTarget = null;
+
+            function positionTip(clientX, clientY) {
+                const pad = 12;
+                const rect = tipEl.getBoundingClientRect();
+                let left = clientX + 14;
+                let top = clientY + 14;
+                if (left + rect.width > window.innerWidth - pad) {
+                    left = Math.max(pad, clientX - rect.width - 12);
+                }
+                if (top + rect.height > window.innerHeight - pad) {
+                    top = Math.max(pad, clientY - rect.height - 12);
+                }
+                tipEl.style.left = left + 'px';
+                tipEl.style.top = top + 'px';
+            }
+
+            document.addEventListener('mouseover', function(e) {
+                const el = e.target && e.target.closest ? e.target.closest('[data-tip]') : null;
+                if (!el) return;
+                activeTarget = el;
+                tipEl.textContent = el.getAttribute('data-tip');
+                tipEl.classList.add('visible');
+                positionTip(e.clientX, e.clientY);
+            });
+
+            document.addEventListener('mousemove', function(e) {
+                if (!activeTarget) return;
+                positionTip(e.clientX, e.clientY);
+            });
+
+            document.addEventListener('mouseout', function(e) {
+                if (!activeTarget) return;
+                const rel = e.relatedTarget;
+                if (rel && activeTarget.contains(rel)) return;
+                activeTarget = null;
+                tipEl.classList.remove('visible');
+            });
+        })();
+
+        async function decodeZlibBuffer(arrayBuf, statusEl) {
             if (typeof DecompressionStream === "undefined") {
                 throw new Error("Browser does not support DecompressionStream.");
             }
-            const decompressed = stream.pipeThrough(new DecompressionStream("deflate"));
+            const decompressed = new Blob([arrayBuf]).stream().pipeThrough(new DecompressionStream("deflate"));
             const text = await new Response(decompressed).text();
+            if (statusEl) {
+                statusEl.textContent = `Parsing JSON (${(text.length / 1e6).toFixed(1)} MB)...`;
+                await new Promise(r => setTimeout(r, 0));
+            }
             return JSON.parse(text);
         }
 
-        function bootWithRuns(runsObj) {
+        async function bootWithRuns(runsObj) {
+            const statusEl = document.getElementById('loader-status');
             RUNS = runsObj;
             const keys = Object.keys(RUNS);
             if (keys.length === 0) {
@@ -1048,16 +1681,10 @@
                 activeRunKey = keys[0];
             }
             currentRun = RUNS[activeRunKey];
-            runSelect.innerHTML = "";
-            keys.forEach(k => {
-                const opt = document.createElement('option');
-                opt.value = k;
-                opt.textContent = k;
-                if (k === activeRunKey) opt.selected = true;
-                runSelect.appendChild(opt);
-            });
-            document.getElementById('data-loader-overlay').classList.add('hidden');
+            statusEl.textContent = `Rendering ${currentRun.particles.length} trajectories...`;
+            await new Promise(r => setTimeout(r, 0));
             renderActiveRun();
+            document.getElementById('data-loader-overlay').classList.add('hidden');
         }
 
         async function loadSidecarAndBoot() {
@@ -1068,31 +1695,60 @@
             fileInput.addEventListener('change', async function(e) {
                 const file = e.target.files && e.target.files[0];
                 if (!file) return;
-                statusEl.textContent = `Decompressing ${file.name}...`;
+                statusEl.textContent = `Reading ${file.name} (${(file.size / 1e6).toFixed(2)} MB)...`;
                 try {
-                    const runsObj = await decodeZlibJson(file.stream());
-                    bootWithRuns(runsObj);
+                    const buf = await file.arrayBuffer();
+                    statusEl.textContent = `Decompressing ${file.name}...`;
+                    await new Promise(r => setTimeout(r, 0));
+                    const runsObj = await decodeZlibBuffer(buf, statusEl);
+                    await bootWithRuns(runsObj);
                 } catch (err) {
-                    statusEl.textContent = `Failed to decode ${file.name}: ${err.message}`;
+                    statusEl.textContent = `Failed to load ${file.name}: ${err.message}`;
+                    pickerEl.style.display = "block";
                 }
             });
 
+            // Browsers block fetch() on file:// URLs by CORS policy; show the manual picker immediately.
+            if (window.location.protocol === "file:") {
+                statusEl.textContent =
+                    `Local file:// mode: browsers block automatic fetch of ${SIDECAR_FILE}. ` +
+                    `Select ${SIDECAR_FILE} below, or serve this folder over HTTP/HTTPS for auto-loading.`;
+                pickerEl.style.display = "block";
+                return;
+            }
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
             try {
-                const resp = await fetch(`./${SIDECAR_FILE}`);
+                statusEl.textContent = `Fetching ${SIDECAR_FILE}...`;
+                const resp = await fetch(`./${SIDECAR_FILE}`, { signal: controller.signal });
+                clearTimeout(timeoutId);
                 if (!resp.ok) {
                     throw new Error(`HTTP ${resp.status}`);
                 }
-                statusEl.textContent = `Decompressing ${SIDECAR_FILE}...`;
-                const runsObj = await decodeZlibJson(resp.body);
-                bootWithRuns(runsObj);
+                const buf = await resp.arrayBuffer();
+                statusEl.textContent = `Decompressing ${SIDECAR_FILE} (${(buf.byteLength / 1e6).toFixed(2)} MB)...`;
+                await new Promise(r => setTimeout(r, 0));
+                const runsObj = await decodeZlibBuffer(buf, statusEl);
+                await bootWithRuns(runsObj);
             } catch (err) {
+                clearTimeout(timeoutId);
+                const msg = err.name === "AbortError" ? "request timed out after 15 s" : err.message;
                 statusEl.textContent =
-                    `Automatic fetch of ${SIDECAR_FILE} was blocked or unavailable (${err.message}). ` +
-                    `Serve this folder over HTTP/HTTPS (e.g. GitHub Pages or a local server), ` +
-                    `or select ${SIDECAR_FILE} directly below.`;
+                    `Automatic fetch of ${SIDECAR_FILE} failed (${msg}). ` +
+                    `Select ${SIDECAR_FILE} directly below.`;
                 pickerEl.style.display = "block";
             }
         }
+
+        window.addEventListener('error', function(e) {
+            const statusEl = document.getElementById('loader-status');
+            const pickerEl = document.getElementById('loader-picker');
+            if (statusEl && !document.getElementById('data-loader-overlay').classList.contains('hidden')) {
+                statusEl.textContent = `Dashboard initialization error: ${e.message}`;
+                if (pickerEl) pickerEl.style.display = "block";
+            }
+        });
 
         loadSidecarAndBoot();
     </script>
