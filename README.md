@@ -1,4 +1,6 @@
-# To see the simulation go here: [https://mum0n.github.io/TethysDrift/](https://mum0n.github.io/TethysDrift/)
+# To see the simulation for snow crab, go here:
+
+[https://mum0n.github.io/TethysDrift/](https://mum0n.github.io/TethysDrift/)
 
 
 
