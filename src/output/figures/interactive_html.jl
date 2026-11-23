@@ -892,7 +892,7 @@ function export_interactive_tracks_html(
                 </div>
 
                 <div class="control-section">
-                    <h4>Focus Particle <span class="info-badge" data-tip="Isolate a single larva to inspect its full trajectory, live telemetry, and depth/temperature sparkline. Clicking any larva or track on the map also focuses it; press Esc to return to Overview.">i</span></h4>
+                    <h4>Focus Particle <span class="info-badge" data-tip="Isolate a single larva from the dropdown to inspect its full trajectory, live telemetry, and depth/temperature sparkline. Press Esc to return to Overview.">i</span></h4>
                     <select id="particle-select" class="control-select" data-tip="Select an individual larva by ID to center on it and display its depth and temperature time-series sparkline.">
                         <option value="-1">Overview (All Larvae)</option>
                     </select>
@@ -967,7 +967,7 @@ function export_interactive_tracks_html(
                         <label data-tip="Animated trajectory segments up to the current playback time (clipped by the Trail Length setting)."><input type="checkbox" id="layer-progtrails" checked> Progressive Trails</label>
                     </div>
                     <div class="layer-item">
-                        <label data-tip="Current position of each visible larva at the active timestep. Click any head to focus that larva."><input type="checkbox" id="layer-heads"> Active Larval Heads</label>
+                        <label data-tip="Current position of each visible larva at the active timestep. Hover any head for its ID and stage."><input type="checkbox" id="layer-heads"> Active Larval Heads</label>
                     </div>
                     <div class="layer-item">
                         <label data-tip="Initial spawning release sites on the continental shelf (50–300 m seabed depth; green triangles). Click a marker for coordinates."><input type="checkbox" id="layer-release"> Spawning Releases</label>
@@ -1243,32 +1243,34 @@ function export_interactive_tracks_html(
                     return;
                 }
 
-                // Full Polyline
+                // Full Polyline (non-interactive so single map clicks always select nearest releases)
                 const fullPoly = L.polyline(fullLatLngs, {
                     color: getColor(p, lastValid),
                     weight: 2.2,
-                    opacity: 0.55
-                }).on('click', (e) => { L.DomEvent.stopPropagation(e); selectParticle(p.id); });
+                    opacity: 0.55,
+                    interactive: false
+                });
                 fullTrackPolylines.push(fullPoly);
                 fullTracksLayer.addLayer(fullPoly);
 
-                // Progress Polyline
+                // Progress Polyline (non-interactive so single map clicks always select nearest releases)
                 const progPoly = L.polyline(fullLatLngs.slice(0, Math.min(2, fullLatLngs.length)), {
                     color: getColor(p, firstValid),
                     weight: 3.5,
-                    opacity: 0.95
-                }).on('click', (e) => { L.DomEvent.stopPropagation(e); selectParticle(p.id); });
+                    opacity: 0.95,
+                    interactive: false
+                });
                 progressTrackPolylines.push(progPoly);
                 progressTracksLayer.addLayer(progPoly);
 
-                // Head Marker (fill only, no outline)
+                // Head Marker (fill only, no outline; hover tooltip without intercepting map click)
                 const marker = L.circleMarker([p.lats[firstValid], p.lons[firstValid]], {
                     radius: 5.5,
                     stroke: false,
                     weight: 0,
                     fillColor: getColor(p, firstValid),
                     fillOpacity: 1.0
-                }).on('click', (e) => { L.DomEvent.stopPropagation(e); selectParticle(p.id); });
+                });
                 marker.bindTooltip(`<b>Larva #\${p.id}</b> (\${p.stages[firstValid]})`, { sticky: true });
                 headMarkers.push(marker);
                 activeHeadsLayer.addLayer(marker);

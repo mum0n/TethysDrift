@@ -271,6 +271,91 @@ function _build_domain_interior_fn(
     end
 end
 
+"""
+    _build_closed_land_polygons(coastline) -> Vector{NamedTuple}
+
+Convert coastline segments into closed land polygons suitable for point-in-polygon
+and scanline rasterization. Already-closed island polygons are retained directly;
+open continental linestrings (such as Natural Earth's split North American Atlantic
+coastline) are stitched at shared endpoints and closed through the western
+continental interior so mainland peninsulas (Nova Scotia, New Brunswick, Maine,
+Quebec, Labrador) are masked completely.
+"""
+function _build_closed_land_polygons(coastline)
+    closed = NamedTuple{
+        (:min_x, :max_x, :min_y, :max_y, :lons, :lats),
+        Tuple{Float64, Float64, Float64, Float64, Vector{Float64}, Vector{Float64}}
+    }[]
+    open_segs = Tuple{Vector{Float64}, Vector{Float64}}[]
+    for p in coastline
+        length(p.lons) >= 3 || continue
+        lo = Float64.(collect(p.lons))
+        la = Float64.(collect(p.lats))
+        if hypot(lo[end] - lo[1], la[end] - la[1]) <= 1e-6
+            push!(closed, (
+                min_x = minimum(lo), max_x = maximum(lo),
+                min_y = minimum(la), max_y = maximum(la),
+                lons = lo, lats = la
+            ))
+        else
+            push!(open_segs, (lo, la))
+        end
+    end
+
+    # Stitch open coastline segments sharing endpoints within 1e-4 deg (~10 m)
+    used = falses(length(open_segs))
+    stitched = Tuple{Vector{Float64}, Vector{Float64}}[]
+    for i in eachindex(open_segs)
+        used[i] && continue
+        used[i] = true
+        lo = copy(open_segs[i][1])
+        la = copy(open_segs[i][2])
+        changed = true
+        while changed
+            changed = false
+            for j in eachindex(open_segs)
+                used[j] && continue
+                lo2, la2 = open_segs[j]
+                if hypot(lo[end] - lo2[1], la[end] - la2[1]) <= 1e-4
+                    append!(lo, @view lo2[2:end])
+                    append!(la, @view la2[2:end])
+                    used[j] = true
+                    changed = true
+                elseif hypot(lo[end] - lo2[end], la[end] - la2[end]) <= 1e-4
+                    append!(lo, reverse(@view lo2[1:(end - 1)]))
+                    append!(la, reverse(@view la2[1:(end - 1)]))
+                    used[j] = true
+                    changed = true
+                elseif hypot(lo[1] - lo2[end], la[1] - la2[end]) <= 1e-4
+                    lo = vcat(lo2[1:(end - 1)], lo)
+                    la = vcat(la2[1:(end - 1)], la)
+                    used[j] = true
+                    changed = true
+                elseif hypot(lo[1] - lo2[1], la[1] - la2[1]) <= 1e-4
+                    lo = vcat(reverse(lo2[2:end]), lo)
+                    la = vcat(reverse(la2[2:end]), la)
+                    used[j] = true
+                    changed = true
+                end
+            end
+        end
+        push!(stitched, (lo, la))
+    end
+
+    # Close stitched continental coastlines through the western continental interior
+    for (lo, la) in stitched
+        west_x = min(minimum(lo), -110.0) - 5.0
+        lo_c = vcat(lo, [west_x, west_x, lo[1]])
+        la_c = vcat(la, [la[end], la[1], la[1]])
+        push!(closed, (
+            min_x = minimum(lo_c), max_x = maximum(lo_c),
+            min_y = minimum(la_c), max_y = maximum(la_c),
+            lons = lo_c, lats = la_c
+        ))
+    end
+    return closed
+end
+
 function _build_static_wet_mask(
     fw::_FlowWindowInterpolator;
     bathy_elevation::Union{Nothing, AbstractMatrix} = nothing,
@@ -288,32 +373,78 @@ function _build_static_wet_mask(
                       isfinite(s0.T[i, j, k_surf])
     end
 
-    # Bake closed coastline polygons onto ALL wet grid cells once (regardless of smoothed
-    # seabed depth, which can be < -50 m near steep coastal channels such as Cape North).
+    # Bake closed island and stitched mainland coastline polygons onto ALL wet grid cells
+    # once using O(ny * n_edges) scanline rasterization, and mark grid cells intersected by
+    # any polygon edge so sub-grid (< 2 km) headlands and islands get an exact polygon check.
+    closed_polys = NamedTuple{
+        (:min_x, :max_x, :min_y, :max_y, :lons, :lats),
+        Tuple{Float64, Float64, Float64, Float64, Vector{Float64}, Vector{Float64}}
+    }[]
+    coastal2d = falses(nx, ny)
     if !isnothing(coastline) && !isempty(coastline)
-        closed_polys = [
-            (
-                min_x = minimum(p.lons),
-                max_x = maximum(p.lons),
-                min_y = minimum(p.lats),
-                max_y = maximum(p.lats),
-                lons = p.lons,
-                lats = p.lats
-            ) for p in coastline if length(p.lons) >= 3 &&
-                                    p.lons[begin] == p.lons[end] &&
-                                    p.lats[begin] == p.lats[end]
-        ]
+        closed_polys = _build_closed_land_polygons(coastline)
         if !isempty(closed_polys)
-            @inbounds for j in 1:ny
-                la = fw.lat[j]
-                for i in 1:nx
-                    wet2d[i, j] || continue
-                    lo = fw.lon[i]
-                    for cp in closed_polys
-                        if cp.min_x <= lo <= cp.max_x && cp.min_y <= la <= cp.max_y &&
-                           Tethys.point_in_polygon(lo, la, cp.lons, cp.lats)
-                            wet2d[i, j] = false
-                            break
+            lon_vals = fw.lon
+            lat_vals = fw.lat
+            lon_asc = fw.lon_asc
+            lat_asc = fw.lat_asc
+            x_ints = Float64[]
+            for cp in closed_polys
+                plons = cp.lons
+                plats = cp.lats
+                nverts = length(plons)
+                for j in 1:ny
+                    la = lat_vals[j]
+                    (cp.min_y <= la <= cp.max_y) || continue
+                    empty!(x_ints)
+                    @inbounds for k in 1:(nverts - 1)
+                        y1 = plats[k]
+                        y2 = plats[k + 1]
+                        if (y1 > la) != (y2 > la)
+                            x1 = plons[k]
+                            x2 = plons[k + 1]
+                            push!(x_ints, x1 + (la - y1) * (x2 - x1) / (y2 - y1))
+                        end
+                    end
+                    length(x_ints) >= 2 || continue
+                    sort!(x_ints)
+                    @inbounds for m in 1:2:(length(x_ints) - 1)
+                        x_lo = x_ints[m]
+                        x_hi = x_ints[m + 1]
+                        if lon_asc
+                            i_lo = searchsortedfirst(lon_vals, x_lo)
+                            i_hi = searchsortedlast(lon_vals, x_hi)
+                            for i in i_lo:i_hi
+                                wet2d[i, j] = false
+                            end
+                        else
+                            for i in 1:nx
+                                if x_lo <= lon_vals[i] <= x_hi
+                                    wet2d[i, j] = false
+                                end
+                            end
+                        end
+                    end
+                end
+                # Flag cells touched by polygon edges (for sub-grid headland/island exact check)
+                grid_xmin, grid_xmax = extrema(lon_vals)
+                grid_ymin, grid_ymax = extrema(lat_vals)
+                if cp.max_x >= grid_xmin && cp.min_x <= grid_xmax &&
+                   cp.max_y >= grid_ymin && cp.min_y <= grid_ymax
+                    @inbounds for k in 1:(nverts - 1)
+                        x1, x2 = plons[k], plons[k + 1]
+                        y1, y2 = plats[k], plats[k + 1]
+                        ex_lo, ex_hi = minmax(x1, x2)
+                        ey_lo, ey_hi = minmax(y1, y2)
+                        (ex_hi < grid_xmin || ex_lo > grid_xmax ||
+                         ey_hi < grid_ymin || ey_lo > grid_ymax) && continue
+                        ia, _, _ = _bracket_axis(lon_vals, ex_lo, lon_asc)
+                        _, ib, _ = _bracket_axis(lon_vals, ex_hi, lon_asc)
+                        ja, _, _ = _bracket_axis(lat_vals, ey_lo, lat_asc)
+                        _, jb, _ = _bracket_axis(lat_vals, ey_hi, lat_asc)
+                        for jj in max(1, min(ja, jb)):min(ny, max(ja, jb)),
+                            ii in max(1, min(ia, ib)):min(nx, max(ia, ib))
+                            coastal2d[ii, jj] = true
                         end
                     end
                 end
@@ -334,7 +465,16 @@ function _build_static_wet_mask(
         (lon_min <= lo <= lon_max && lat_min <= la <= lat_max) || return false
         i0, i1, _ = _bracket_axis(lon, lo, lon_asc)
         j0, j1, _ = _bracket_axis(lat, la, lat_asc)
-        @inbounds return wet2d[i0, j0] && wet2d[i1, j0] && wet2d[i0, j1] && wet2d[i1, j1]
+        @inbounds (wet2d[i0, j0] && wet2d[i1, j0] && wet2d[i0, j1] && wet2d[i1, j1]) || return false
+        if @inbounds (coastal2d[i0, j0] || coastal2d[i1, j0] || coastal2d[i0, j1] || coastal2d[i1, j1])
+            for cp in closed_polys
+                if cp.min_x <= lo <= cp.max_x && cp.min_y <= la <= cp.max_y &&
+                   Tethys.point_in_polygon(lo, la, cp.lons, cp.lats)
+                    return false
+                end
+            end
+        end
+        return true
     end
 end
 
@@ -537,8 +677,9 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
     # coastline polygons so wet/land checks take O(log N) nanoseconds and never evict
     # the active two-snapshot sliding window.
     hydro_t0 = hydro_span[1]
+    edge_margin_km = max(25.0, Float64(opts.buffer_km))
     domain_interior_fn = if !isnothing(flow_interpolator) && !isnothing(store)
-        _build_domain_interior_fn(flow_interpolator; margin_km = 25.0, rot_deg = 35.0)
+        _build_domain_interior_fn(flow_interpolator; margin_km = edge_margin_km, rot_deg = 35.0)
     else
         nothing
     end
@@ -652,7 +793,7 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
     # realized local benthic temperature climatology when the tracking horizon covers
     # at least half an annual cycle.
     release_times = if track_horizon >= 180.0 * 86400.0
-        base_date = Dates.Date(2020, 6, 1)  # Default June 1, 2020 origin matching scotian_shelf.toml
+        base_date = Dates.Date(2019, 12, 1)  # Default Dec 1, 2019 origin matching scotian_shelf.toml
         if !isnothing(store) && hasproperty(store, :attrs)
             iso_str = get(store.attrs, "time_origin_iso", "")
             if !isempty(string(iso_str))
@@ -1570,7 +1711,7 @@ function run_segment_visualize(;
     # 10. Interactive HTML5 Dashboard (with zlib-compressed sidecar payload)
     html_path = joinpath(opts.output_dir, "interactive_larval_tracks.html")
     if opts.interactive_map
-        base_date = Dates.Date(2020, 6, 1)
+        base_date = Dates.Date(2019, 12, 1)
         if !isnothing(hydro_store) && hasproperty(hydro_store, :attrs)
             iso_str = get(hydro_store.attrs, "time_origin_iso", "")
             if !isempty(string(iso_str))

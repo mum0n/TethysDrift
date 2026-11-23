@@ -283,6 +283,7 @@ using Zarr
             @test occursin("const SIDECAR_FILE = \"tracks.data.zz\";", html_text)
             @test occursin("id=\"nearest-n-input\"", html_text)
             @test occursin("function selectNearestReleases", html_text)
+            @test !occursin("selectParticle(p.id)", html_text)
             @test occursin("id=\"ui-tooltip\"", html_text)
             @test occursin("data-tip=", html_text)
             @test occursin("window.location.protocol === \"file:\"", html_text)
@@ -347,7 +348,27 @@ using Zarr
             TethysDrift.load_config(joinpath(@__DIR__, "..", "configs", "snowcrab.toml"))
         )
         @test snow_cfg.track_duration ≈ 340.0 * 86400.0
-        @test snow_cfg.hydro_start_days == 207.0
+        @test snow_cfg.hydro_start_days == 0.0
+
+        # Jan 1 start (DOY 1) releases larvae in Jan-Apr (Day 0..119) with zero anchor delay
+        rt_jan = TethysDrift.sample_brood_hatch_times(
+            fill(-62.0, 100), fill(44.5, 100), fill(-120.0, 100);
+            temperature_fn = (lo, la, z, t) -> 3.0,
+            origin_doy = 1.0,
+            total_duration = 340.0 * 86400.0,
+            rng = TethysDrift.Random.MersenneTwister(42)
+        )
+        @test minimum(rt_jan) / 86400.0 >= 0.0
+        @test maximum(rt_jan) / 86400.0 <= 119.0 + 1e-6
+
+        # Misaligned origin that cannot fit Jan-Apr + min_pelagic_days must fail loudly
+        @test_throws ErrorException TethysDrift.sample_brood_hatch_times(
+            fill(-62.0, 10), fill(44.5, 10), fill(-120.0, 10);
+            temperature_fn = (lo, la, z, t) -> 3.0,
+            origin_doy = 208.0,
+            total_duration = 310.0 * 86400.0,
+            rng = TethysDrift.Random.MersenneTwister(42)
+        )
 
         # Domain-boundary exit rule marks exiting larvae as :off_domain and stops tracking them
         p_exit = TethysDrift.initialize_larval_particles(
@@ -368,6 +389,17 @@ using Zarr
         @test res_exit.settlement_status[1] == :off_domain
         @test res_exit.stages[1, end] == :off_domain
         @test res_exit.alive[1] == false
+
+        # Open continental coastline linestrings sharing an endpoint must stitch and close
+        # through the western interior so mainland land points are masked as land.
+        open_coast = [
+            (lons = [-75.0, -70.0, -68.0], lats = [40.0, 42.0, 43.0]),
+            (lons = [-65.0, -66.0, -68.0], lats = [46.0, 44.5, 43.0]),
+        ]
+        closed_land = TethysDrift._build_closed_land_polygons(open_coast)
+        @test length(closed_land) == 1
+        @test Tethys.point_in_polygon(-72.0, 44.0, closed_land[1].lons, closed_land[1].lats)
+        @test !Tethys.point_in_polygon(-62.0, 44.0, closed_land[1].lons, closed_land[1].lats)
 
         mktempdir() do tmp
             zpath = joinpath(tmp, "offset_hydro.zarr")

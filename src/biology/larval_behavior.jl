@@ -243,13 +243,23 @@ function sample_brood_hatch_times(
         end
     end
 
-    # Anchor the sole Jan-Apr hatch window to its first full occurrence after origin_doy
-    # that still leaves at least `min_pelagic_days` of remaining hydrodynamic coverage.
+    # Anchor the sole Jan-Apr hatch window to its first full occurrence after origin_doy.
+    # Fail loudly if the tracking horizon cannot cover the hatch window plus min_pelagic_days
+    # rather than silently shifting hatching into an out-of-season month.
     total_days = Float64(total_duration) / 86400.0
     anchor_delay = mod(d_start - Float64(origin_doy), 365.0)
-    max_anchor = max(0.0, total_days - win_len - Float64(min_pelagic_days))
-    if anchor_delay > max_anchor
-        anchor_delay = max_anchor
+    required_days = anchor_delay + win_len + Float64(min_pelagic_days)
+    if total_days + 1e-9 < required_days
+        error(
+            "Tracking horizon ($(round(total_days, digits = 1)) d starting at DOY " *
+            "$(round(Float64(origin_doy), digits = 1))) cannot cover the DOY " *
+            "$(round(d_start, digits = 1))..$(round(d_end, digits = 1)) hatch window " *
+            "(delay $(round(anchor_delay, digits = 1)) d + window " *
+            "$(round(win_len, digits = 1)) d) plus min_pelagic_days = " *
+            "$(round(Float64(min_pelagic_days), digits = 1)) d " *
+            "(requires $(round(required_days, digits = 1)) d). " *
+            "Adjust [biology] hydro_start_days or track_duration_days."
+        )
     end
 
     margin = min(10.0, 0.2 * win_len)
