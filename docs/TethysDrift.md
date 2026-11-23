@@ -254,41 +254,48 @@ $$z_{\text{target}}(t) = \frac{z_{\text{day}} + z_{\text{night}}}{2} - z_{\text{
 
 $$w_{\text{swim}}(z, t) = w_{\max} \tanh\left( \frac{z_{\text{target}}(t) - z}{L_{\text{relax}}} \right)$$
 
-#### C. In Situ Thermal Degree-Days & Calibrated Ontogenetic Molting
-Thermal degree-days accumulate along 3D trajectories relative to the physiological baseline $T_0 = -1.5^\circ\text{C}$ (Kuhn & Choi, 2011):
+#### C. Arrhenius-Weighted Sole-Cohort Hatching, Degree-Days & `TethysBio`-Aligned Molting
+Before hatching, eggs remain stationary on the seabed (`50–300 m` shelf depth) in stage `:egg`. Individual hatch times for a single contiguous Jan 1 – Apr 30 cohort (`DOY 1–120`) are sampled from a truncated cumulative Normal hazard modulated by the site's annual-mean benthic temperature $\bar{T}_{\text{bed}}$ via an Arrhenius rate factor (`arrhenius_hatch_rate`, `sample_brood_hatch_times`, aligned with `TethysBio`):
 
-$$DD(t) = \int_0^t \max\left( 0.0, T(x(\tau), y(\tau), z(\tau), \tau) - T_0 \right) d\tau \quad (T_0 = -1.5^\circ\text{C})$$
+$$r(\bar{T}_{\text{bed}}) = \exp\!\left[-\frac{E_a}{k_B}\left(\frac{1}{\max(270.0, \bar{T}_{\text{bed}} + 273.15)} - \frac{1}{T_{\text{ref}} + 273.15}\right)\right]$$
 
-- **Zoea I $\to$ Zoea II**: $DD \ge 65.0^\circ\text{C} \cdot \text{days}$
-- **Zoea II $\to$ Megalopa**: $DD \ge 130.0^\circ\text{C} \cdot \text{days}$
-- **Megalopa $\to$ Instar I (Competent Settlement)**: $DD \ge 200.0^\circ\text{C} \cdot \text{days}$
+with $E_a = 0.55\text{ eV}$ ($Q_{10} \approx 2.34$) and $T_{\text{ref}} = 3.0\,^\circ\text{C}$, shifting modal hatch day $\mu = \text{clamp}(60.0 / r, 11.0, 110.0)$ earlier at warmer sites and later at colder sites ($\sigma = 20.0\text{ d}$).
 
-#### D. Temperature-Dependent PLD & Thermal Stress Mortality
-Pelagic Larval Duration scales with temperature: $\text{PLD}(T) = 135.0 \cdot (T - T_0)^{-0.75}\text{ days}$.
+After hatching into `:zoea1`, per-stage physiological degree-days accumulate via the Boltzmann-Arrhenius developmental rate (`arrhenius_degree_day_increment`, anchored at $(T_{\text{ref}} - T_0) = 4.5^\circ\text{C}\cdot\text{d/day}$ at $T_{\text{ref}} = 3.0^\circ\text{C}$ and $T_0 = -1.5^\circ\text{C}$) and reset at each ecdysis (matching `TethysBio`, without benthic thermal inhibition):
 
-Instantaneous daily mortality rate $\mu(T)$ includes baseline mortality, stage-specific scaling (Zoea I: $1.1\times$, Zoea II: $1.0\times$, Megalopa: $0.8\times$), exponential warm stress, and linear cold stress:
+$$DD_{\text{stage}}(t) = \int_{t_{\text{molt}}}^{t} (T_{\text{ref}} - T_0) \cdot r\!\left(T(\boldsymbol{x}(\tau), \tau)\right) d\tau$$
 
-$$\mu(T) = \mu_0 s_{\text{stage}} \exp\left( \beta \max(0, T - T_{\text{crit}}) \right) + \mu_{\text{cold}} \max(0, T_{\text{cold}} - T)$$
+Stage transitions (`zoea1 -> zoea2 -> megalopa -> competent`) follow `TethysBio`'s continuous Poisson-CDF daily hazard with per-stage requirement $D_{\text{req}} = 270.0\,^\circ\text{C}\cdot\text{d}$ and base rate $h_0 = 0.35\text{ day}^{-1}$:
 
-where $T_{\text{crit}} = 7.0^\circ\text{C}$, $\beta = 0.35^\circ\text{C}^{-1}$, and $T_{\text{cold}} = -1.5^\circ\text{C}$. Stage survival is recorded independently across each ontogenetic molt.
+$$p_{\text{trans}} = 1 - \exp\!\left(-h_0 \cdot \text{PoissonCDF}\!\left(D_{\text{req}}; \lfloor DD_{\text{stage}} \rfloor\right) \Delta t\right)$$
+
+#### D. Pelagic Survival Envelope & Over-Age Penalty
+Pelagic mortality mirrors `TethysBio`: a quadratic thermal multiplier centered at $T_{\text{opt}} = 11.0\,^\circ\text{C}$ ($\sigma_T = 3.5\,^\circ\text{C}$) scales stage baseline hazards, plus an over-age developmental penalty past 84 days in a single pelagic stage:
+
+$$\mu_{\text{pelagic}}(T, d) = h_{\text{base,stage}} \left[1 + 0.5 \left(\frac{T - 11.0}{3.5}\right)^2\right] + 0.05 \cdot \frac{\max(0, d - 84.0)}{10.0}$$
+
+In `configs/snowcrab.toml`, `larval_baseline_hazards = [0.0, 0.0, 0.0]` disables pelagic natural mortality so trajectories reflect advection, over-age developmental arrest, and benthic settlement-habitat suitability.
 
 #### E. Benthic Nursery Settlement Suitability with Subgrid Tidal Filtering
-In energetic tidal regions (CFAs 20–22), semi-diurnal $M_2$ tides displace the thermocline by $\pm 2^\circ\text{C}$ over 12.42 hours. A low-pass exponential filter extracts the true benthic thermal regime:
+In energetic tidal regions (CFAs 20–22), semi-diurnal $M_2$ tides displace the thermocline over 12.42 hours. A low-pass exponential filter extracts the benthic thermal regime:
 
 $$\bar{T}_{\text{bed}}(t + \Delta t) = (1 - \alpha) \bar{T}_{\text{bed}}(t) + \alpha T_{\text{bed}}(t), \quad \alpha = \text{clamp}\left(\frac{\Delta t}{44712}, 0.005, 1.0\right)$$
 
-Competent Megalopae settle when:
-- **Depth Suitability**: $-250.0\text{ m} \le z_{\text{bed}} \le -50.0\text{ m}$;
-- **Thermal Suitability**: Tidally averaged bottom temperature $\bar{T}_{\text{bed}} \le 6.0^\circ\text{C}$.
+In `configs/snowcrab.toml`, competent megalopae settle when:
+- **Depth Suitability**: $-500.0\text{ m} \le z_{\text{bed}} \le -10.0\text{ m}$;
+- **Thermal Suitability**: Tidally averaged bottom temperature $\bar{T}_{\text{bed}} \le 7.0^\circ\text{C}$.
+
+Larvae unable to locate suitable habitat within `competence_window_days` experience settlement mortality (`dead`).
 
 ---
 
 ### 3.7 Administrative CFA Boundary Polygons & Ray-Casting Algorithm
 
-Spatial classification utilizes true administrative boundary vertices from `inputs/cfa*.dat`:
-- **CFA North (CFAs 20–22)**: Eastern Cape Breton & Glace Bay (`inputs/cfanorth.dat`, 17 vertices).
-- **CFA South (CFAs 23–24)**: Middle Scotian Shelf & Halifax (`inputs/cfasouth.dat`, 28 vertices).
-- **CFA 4X**: Southwest Nova Scotia & Browns Bank (`inputs/cfa4x.dat`, 30 vertices).
+Spatial classification uses exact administrative boundary vertices automatically loaded from `docs/cfa*.dat` (or `opts.input_dir` if overridden), ordered northeast-to-southwest along the Scotian Shelf:
+- **CFA North (CFA 20–22)**: Eastern Cape Breton & Glace Bay (`docs/cfanorth.dat`, 15 vertices).
+- **CFA South (CFA 23–24)**: Middle Scotian Shelf & Halifax (`docs/cfasouth.dat`, 26 vertices).
+- **CFA 4X (Southwest NS)**: Southwest Nova Scotia & Browns Bank (`docs/cfa4x.dat`, 28 vertices).
+- **Outside / Offshore**: Catch-all stratum for particles outside all CFA polygons.
 
 #### Jordan Curve (Ray-Casting) Theorem
 For any particle coordinate $(\lambda_p, \phi_p)$, a horizontal ray is cast eastward: $\{\lambda \ge \lambda_p, \phi = \phi_p\}$. For each polygon edge from $(\lambda_i, \phi_i)$ to $(\lambda_{i+1}, \phi_{i+1})$, an intersection occurs if $\phi_p \in [\min(\phi_i, \phi_{i+1}), \max(\phi_i, \phi_{i+1}))$ and:
@@ -1655,15 +1662,15 @@ julia --project=. TethysDriftRun.jl --compare
 
 ---
 
-### 15.5 Standalone Interactive HTML5 + Leaflet.js Dashboard
+### 15.5 Interactive HTML5 + Leaflet.js Dashboard & Rotated Map Figures
 
-Exported automatically via `export_interactive_tracks_html` to
-[`outputs/interactive_larval_tracks.html`](../outputs/interactive_larval_tracks.html):
-- **Multiple Basemaps**: Switch between ESRI Ocean Basemap, CartoDB Dark Matter, and OpenStreetMap.
-- **Dynamic Playback Control**: Time slider scrubber ($t = 0 \to 5\text{ days}$) with Play/Pause animation and speed toggles ($1\times, 5\times, 20\times$).
-- **Ontogenetic Color-Coding**: Dynamic color transitions for Zoea I, Zoea II, Megalopa, Instar I (settled recruit), and thermal mortality.
-- **Live Telemetry HUD**: Hover and click popups displaying real-time depth ($z$), in-situ temperature ($T$), cumulative degree-days ($DD$), and survival probability ($S(t)$).
-- **Administrative CFA Overlays**: True boundary vector polygons (`L.polygon`) for CFA North, CFA South, and CFA 4X with interactive tooltips.
+Exported via `export_interactive_tracks_html` as a paired Leaflet.js shell (`interactive_larval_tracks.html`) and RFC 1950 zlib-compressed sidecar (`interactive_larval_tracks.data.zz`, daily-decimated via `max_points_per_track = 550`, rendered on HTML5 Canvas with `preferCanvas: true`):
+- **Basemaps & Layout**: Switch between ESRI Ocean and CartoDB Dark; collapsible left control sidebar and top-right Particle Palette / Colour Scale dock.
+- **Playback & Filtering**: Play/Pause (`Space`), single-step (`Left`/`Right`), `1x–16x` speeds, cohort outcome filter, current-stage filter (including pre-hatch `:egg`), trail-length window (`Full`, `3–30 d`), and track opacity slider.
+- **Click-Map Nearest-Release Divergence**: Single-click any map location to isolate the `n` nearest released larvae (`n = 5` by default, adjustable `1–50`) and view live cluster radial spread (mean and maximum distance from cluster centroid in km) in the Telemetry HUD.
+- **Hover Documentation & CSV Export**: Floating hover tooltips (`i` badges and control tips) document model assumptions (including suitable vs. unsuitable settlement habitat), and focused larvae provide a depth/temperature sparkline and CSV time-series download.
+- **Shelf-Aligned PNG Maps**: All static Eulerian and larval diagnostic maps (`hydrodynamic_*.png`, `larval_trajectories.png`, `settlement_density.png`, `empirical_movement_field.png`, `thermal_exposure_map.png`, `recruitment_summary.png`, `bottom_temperature_map.png`) are rendered in a consistent 35° shelf-aligned rotated frame with background-matched land masking.
+- See [`docs/github_pages.md`](github_pages.md) for local viewing (`file://` picker or `http.server`) and GitHub Pages deployment.
 
 ---
 

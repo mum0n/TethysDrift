@@ -1,9 +1,24 @@
 # Interactive Dashboard: Local Viewing and GitHub Pages Deployment
 
+
+```
+
+git switch gh-pages
+Copy-Item ..\lakehouse\TethysDrift\snowcrab\interactive_larval_tracks.html .\index.html
+Copy-Item ..\lakehouse\TethysDrift\snowcrab\interactive_larval_tracks.data.zz .\interactive_larval_tracks.data.zz
+git add index.html interactive_larval_tracks.data.zz
+git commit --amend --no-edit
+git push --force-with-lease origin gh-pages
+git switch main
+
+```
+
+
+
 `export_interactive_tracks_html` writes two paired files to the configured output directory (for example, `../lakehouse/TethysDrift/snowcrab/`):
 
-- `interactive_larval_tracks.html`: Leaflet.js dashboard shell.
-- `interactive_larval_tracks.data.zz`: RFC 1950 zlib-compressed JSON sidecar containing full-resolution particle trajectories, developmental stages, settlement density, and regional connectivity flows.
+- `interactive_larval_tracks.html`: Canvas-backed (`preferCanvas: true`) Leaflet.js dashboard shell with collapsible left controls, top-right palette/legend dock, single-click `n`-nearest release divergence inspection, and hover tooltips documenting controls and habitat assumptions.
+- `interactive_larval_tracks.data.zz`: RFC 1950 zlib-compressed JSON sidecar containing daily-resolution particle trajectories (`max_points_per_track = 550` in `driver.jl`), developmental stages (including pre-hatch `:egg`), and settlement density.
 
 Eulerian hydrodynamic grids are excluded from the dashboard payload (handled by `TethysFlow`). None of the `.zarr` archives or `.nc` files are needed by the browser.
 

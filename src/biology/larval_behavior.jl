@@ -10,7 +10,7 @@ using Random
 # frailty and molt quantiles are mapped through, `Beta(α,β)` for the bounded settlement index.
 # Without it the first larval initialisation fails at `Normal(0.0, 1.0)` rather than at the
 # import, which is a long way from the cause.
-using Distributions: quantile, Normal, Beta, cdf, LogNormal
+using Distributions: quantile, Normal, Beta, cdf, LogNormal, Poisson
 
 # ==============================================================================
 # Pelagic development and mortality: the canonical numbers
@@ -110,6 +110,164 @@ inhibition silently shuts molting off for part or all of the season.
 """
 const MOLT_THERMAL_ONSET = 10.0
 const MOLT_THERMAL_BANDWIDTH = 3.0
+
+"""
+    AGGREGATE_TRANSITION_HAZARD
+
+Daily pelagic stage-transition rate `h0` (day⁻¹) matching `TethysBio`'s
+`aggregate_transition_hazard = 0.35`. The effective transition hazard at accumulated
+degree-days `DD` is `h0 * cdf(Poisson(req), floor(DD))`.
+"""
+const AGGREGATE_TRANSITION_HAZARD = 0.35
+
+# Arrhenius-weighted seasonal hatching parameters for snow crab (Jan 1 - Apr 30).
+const HATCH_WINDOW_START_DOY = 1.0     # Jan 1
+const HATCH_WINDOW_END_DOY   = 120.0   # Apr 30
+const HATCH_PEAK_REF_DOY     = 60.0    # Mar 1 modal hatch day at T_ref = 3.0 °C
+const HATCH_SD_DAYS          = 20.0    # Seasonal spread within the Jan-Apr window (days)
+const HATCH_ARRHENIUS_EA_EV  = 0.55    # Ectotherm embryonic activation energy (eV; Q10 ≈ 2.34)
+const HATCH_TEMP_REF_C       = 3.0     # Reference Scotian Shelf bottom temperature (°C)
+const BOLTZMANN_EV_PER_K     = 8.617333262e-5
+
+"""
+    arrhenius_hatch_rate(T_celsius; Ea_eV = 0.55, T_ref_C = 3.0) -> Float64
+
+Dimensionless Arrhenius developmental rate factor relative to `T_ref_C`:
+
+    r(T) = exp(-(Ea / k_B) * (1 / (T + 273.15) - 1 / (T_ref + 273.15)))
+
+Values exceed 1.0 in warmer water (earlier hatching) and fall below 1.0 in colder water
+(later hatching), remaining smooth and strictly positive across sub-zero seawater
+temperatures. Default `Ea_eV = 0.55` eV corresponds to `Q10 ≈ 2.34` at 3 °C.
+"""
+@inline function arrhenius_hatch_rate(
+    T_celsius::Real;
+    Ea_eV::Real = HATCH_ARRHENIUS_EA_EV,
+    T_ref_C::Real = HATCH_TEMP_REF_C
+)::Float64
+    T_K = max(270.0, Float64(T_celsius) + 273.15)
+    T_ref_K = Float64(T_ref_C) + 273.15
+    return exp(-(Float64(Ea_eV) / BOLTZMANN_EV_PER_K) * (1.0 / T_K - 1.0 / T_ref_K))
+end
+
+"""
+    arrhenius_degree_day_increment(
+        T_celsius, dt_days = 1.0;
+        temp_base_degreedays = -1.5,
+        Ea_eV = HATCH_ARRHENIUS_EA_EV,
+        T_ref_C = HATCH_TEMP_REF_C
+    ) -> Float64
+
+Arrhenius-scaled physiological degree-day increment aligned with
+`TethysBio.arrhenius_degree_day_increment`: `(T_ref_C - temp_base_degreedays) * r(T) * dt_days`.
+"""
+@inline function arrhenius_degree_day_increment(
+    T_celsius::Real,
+    dt_days::Real = 1.0;
+    temp_base_degreedays::Real = -1.5,
+    Ea_eV::Real = HATCH_ARRHENIUS_EA_EV,
+    T_ref_C::Real = HATCH_TEMP_REF_C
+)::Float64
+    ref_daily_dd = max(0.5, Float64(T_ref_C) - Float64(temp_base_degreedays))
+    return ref_daily_dd * arrhenius_hatch_rate(T_celsius; Ea_eV = Ea_eV, T_ref_C = T_ref_C) * Float64(dt_days)
+end
+
+"""
+    sample_brood_hatch_times(
+        lons, lats, depths;
+        temperature_fn = nothing,
+        origin_doy = 153.0,
+        total_duration = 547.5 * 86400.0,
+        min_pelagic_days = 150.0,
+        default_temperature = 3.0,
+        hatch_window_start_doy = HATCH_WINDOW_START_DOY,
+        hatch_window_end_doy = HATCH_WINDOW_END_DOY,
+        hatch_peak_ref_doy = HATCH_PEAK_REF_DOY,
+        hatch_sd_days = HATCH_SD_DAYS,
+        arrhenius_ea_ev = HATCH_ARRHENIUS_EA_EV,
+        hatch_temp_ref_c = HATCH_TEMP_REF_C,
+        rng = Random.default_rng()
+    ) -> Vector{Float64}
+
+Sample per-particle egg hatch release times (seconds relative to `t = 0`) for a sole
+annual cohort spanning `[hatch_window_start_doy, hatch_window_end_doy]` (Jan 1 – Apr 30)
+using a truncated cumulative Normal hazard modulated by local annual-mean benthic
+temperature via an Arrhenius rate factor:
+
+    mu(T_bed) = clamp(hatch_peak_ref_doy / arrhenius_hatch_rate(T_bed), start + 10, end - 10)
+
+Warmer benthic sites hatch earlier in the Jan–Apr window and colder sites hatch later,
+while every particle is guaranteed to hatch within one contiguous seasonal cohort with at
+least `min_pelagic_days` of remaining hydrodynamic coverage.
+"""
+function sample_brood_hatch_times(
+    lons::AbstractVector{<:Real},
+    lats::AbstractVector{<:Real},
+    depths::AbstractVector{<:Real};
+    temperature_fn::Union{Nothing, Function} = nothing,
+    origin_doy::Real = 153.0,
+    total_duration::Real = 547.5 * 86400.0,
+    min_pelagic_days::Real = 150.0,
+    default_temperature::Real = 3.0,
+    hatch_window_start_doy::Real = HATCH_WINDOW_START_DOY,
+    hatch_window_end_doy::Real = HATCH_WINDOW_END_DOY,
+    hatch_peak_ref_doy::Real = HATCH_PEAK_REF_DOY,
+    hatch_sd_days::Real = HATCH_SD_DAYS,
+    arrhenius_ea_ev::Real = HATCH_ARRHENIUS_EA_EV,
+    hatch_temp_ref_c::Real = HATCH_TEMP_REF_C,
+    rng::AbstractRNG = Random.default_rng()
+)::Vector{Float64}
+    n = length(lons)
+    n == 0 && return Float64[]
+    d_start = Float64(hatch_window_start_doy)
+    d_end   = Float64(hatch_window_end_doy)
+    d_end > d_start || error("hatch_window_end_doy ($d_end) must exceed hatch_window_start_doy ($d_start).")
+    win_len = d_end - d_start
+    sigma   = max(1.0, Float64(hatch_sd_days))
+
+    # Sample time OUTER, particles INNER so two-snapshot sliding-window Zarr readers
+    # load each seasonal snapshot once instead of thrashing disk per particle.
+    sample_ts = total_duration > 0.0 ?
+        collect(range(0.0, Float64(total_duration); length = 12)) : [0.0]
+    t_sums = zeros(Float64, n)
+    t_cnts = zeros(Int, n)
+    if !isnothing(temperature_fn)
+        for ts in sample_ts
+            for p in 1:n
+                v = temperature_fn(Float64(lons[p]), Float64(lats[p]), Float64(depths[p]), ts)
+                if isfinite(v)
+                    t_sums[p] += Float64(v)
+                    t_cnts[p] += 1
+                end
+            end
+        end
+    end
+
+    # Anchor the sole Jan-Apr hatch window to its first full occurrence after origin_doy
+    # that still leaves at least `min_pelagic_days` of remaining hydrodynamic coverage.
+    total_days = Float64(total_duration) / 86400.0
+    anchor_delay = mod(d_start - Float64(origin_doy), 365.0)
+    max_anchor = max(0.0, total_days - win_len - Float64(min_pelagic_days))
+    if anchor_delay > max_anchor
+        anchor_delay = max_anchor
+    end
+
+    margin = min(10.0, 0.2 * win_len)
+    release_times = Vector{Float64}(undef, n)
+    for p in 1:n
+        t_bed = t_cnts[p] > 0 ? (t_sums[p] / t_cnts[p]) : Float64(default_temperature)
+        rate = arrhenius_hatch_rate(t_bed; Ea_eV = arrhenius_ea_ev, T_ref_C = hatch_temp_ref_c)
+        mu_doy = clamp(Float64(hatch_peak_ref_doy) / rate, d_start + margin, d_end - margin)
+        dist = Normal(mu_doy, sigma)
+        cdf_lo = cdf(dist, d_start)
+        cdf_hi = cdf(dist, d_end)
+        # Inverse-CDF draw from the truncated cumulative Normal hatch hazard on [d_start, d_end]
+        u = cdf_lo + rand(rng) * max(1e-12, cdf_hi - cdf_lo)
+        hatch_doy = clamp(quantile(dist, u), d_start, d_end)
+        release_times[p] = (anchor_delay + (hatch_doy - d_start)) * 86400.0
+    end
+    return release_times
+end
 
 """
     min_stage_days_for(stage::Symbol, schedule::Union{Nothing, Tuple}) -> Union{Nothing, Float64}
@@ -1527,10 +1685,12 @@ function initialize_larval_particles(
     bottom_offset::Tuple{Real, Real} = (0.5, 3.0),
     ascent_target_depth::Real = -10.0,
     min_seabed_depth::Real = 100.0,
+    max_seabed_depth::Real = Inf,
     buffer_km::Real = 0.0,
     bathymetry::Union{Nothing, Function, NamedTuple, TethysDataset} = nothing,
     bathymetry_fn::Union{Nothing, Function, NamedTuple, TethysDataset} = nothing,
     coastline::Union{Nothing, AbstractVector{<:NamedTuple}} = nothing,
+    wet_mask_fn::Union{Nothing, Function} = nothing,
     stratum::Union{Nothing, NamedTuple, Symbol, AbstractString} = nothing,
     stage::Symbol = :zoea1,
     max_attempts::Int = 100000,
@@ -1681,13 +1841,19 @@ function initialize_larval_particles(
                 continue
             end
 
-            # 3. Bathymetric elevation constraint
+            # 3. Bathymetric elevation constraint (continental shelf depth band)
             z_bed = !isnothing(bathy_fn) ? bathy_fn(cand_lon, cand_lat) : -h_min - 10.0
-            if z_bed > -h_min || z_bed >= 0.0
+            h_max = Float64(max_seabed_depth)
+            if z_bed > -h_min || z_bed >= 0.0 || (isfinite(h_max) && z_bed < -h_max)
                 continue
             end
 
             cand_z = sample_initial_depth(z_bed)
+
+            # 4. Realized hydrodynamic wet-domain check (rejects dry/outside-footprint cells)
+            if !isnothing(wet_mask_fn) && !wet_mask_fn(cand_lon, cand_lat, cand_z)
+                continue
+            end
 
             accepted += 1
             lons[accepted] = cand_lon
@@ -1791,6 +1957,7 @@ function track_larval_cohort(
     bathymetry_fn::Union{Nothing, Function} = nothing,
     total_duration::Real = 86400.0,
     dt::Real = 300.0,
+    output_interval::Union{Nothing, Real} = nothing,
     κ_h::Real = 10.0,
     κ_v::Real = 1e-4,
     is_lat_lon::Bool = true,
@@ -1805,6 +1972,8 @@ function track_larval_cohort(
     larval_temp_sigma::Real = 3.5,
     larval_overage_hazard::Real = 0.05,
     larval_max_intermolt_days::Real = LARVAL_MAX_INTERMOLT_DAYS,
+    aggregate_transition_hazard::Real = AGGREGATE_TRANSITION_HAZARD,
+    release_times::Union{Nothing, AbstractVector{<:Real}} = nothing,
     settlement_min_depth::Real = -250.0,
     settlement_max_depth::Real = -50.0,
     settlement_max_temp::Real = 6.0,
@@ -1820,6 +1989,8 @@ function track_larval_cohort(
     κ_v_profile::Union{Nothing, Function} = nothing,
     min_survival_prob::Real = 0.01,
     coastline = nothing,
+    wet_mask_fn::Union{Nothing, Function} = nothing,
+    domain_interior_fn::Union{Nothing, Function} = nothing,
     enable_initial_ascent::Bool = true,
     ascent_speed::Real = 0.010,
     ascent_target_depth::Real = -10.0,
@@ -1849,13 +2020,20 @@ function track_larval_cohort(
     times = n_steps == 1 ? [0.0] : collect(range(0.0, total_duration; length = n_steps))
     dt_days = dt / 86400.0
 
-    traj_lon = Matrix{Float64}(undef, n_particles, n_steps)
-    traj_lat = Matrix{Float64}(undef, n_particles, n_steps)
-    traj_depth = Matrix{Float64}(undef, n_particles, n_steps)
-    traj_temp = Matrix{Float64}(undef, n_particles, n_steps)
-    traj_dd = Matrix{Float64}(undef, n_particles, n_steps)
-    traj_surv = Matrix{Float64}(undef, n_particles, n_steps)
-    traj_stage = Matrix{Symbol}(undef, n_particles, n_steps)
+    # Integration runs at `dt`; trajectory matrices are recorded every `save_stride` steps
+    # (controlled by `output_interval`, always retaining t = 0 and the final integrated step).
+    save_stride = (isnothing(output_interval) || Float64(output_interval) <= Float64(dt)) ?
+                  1 : max(1, round(Int, Float64(output_interval) / Float64(dt)))
+    max_out = save_stride == 1 ? n_steps : (fld(n_steps - 1, save_stride) + 2)
+
+    traj_lon = Matrix{Float64}(undef, n_particles, max_out)
+    traj_lat = Matrix{Float64}(undef, n_particles, max_out)
+    traj_depth = Matrix{Float64}(undef, n_particles, max_out)
+    traj_temp = Matrix{Float64}(undef, n_particles, max_out)
+    traj_dd = Matrix{Float64}(undef, n_particles, max_out)
+    traj_surv = Matrix{Float64}(undef, n_particles, max_out)
+    traj_stage = Matrix{Symbol}(undef, n_particles, max_out)
+    out_times = Vector{Float64}(undef, max_out)
 
     current_degree_days = hasproperty(larvae, :degree_days) ?
                           copy(larvae.degree_days) : zeros(Float64, n_particles)
@@ -1911,70 +2089,108 @@ function track_larval_cohort(
     # cohort's mean degree-days: the degree-days are accumulated per stage and reset at
     # each ecdysis, so the cohort mean is an average over different stages and says more
     # about the stage mix than about the cohort's development.
-    cohort_molt = Matrix{Float64}(undef, 3, n_steps)
+    cohort_molt = Matrix{Float64}(undef, 3, max_out)
 
-    # Set initial states at t = 0
-    traj_lon[:, 1] = copy(larvae.lon)
-    traj_lat[:, 1] = copy(larvae.lat)
-    traj_depth[:, 1] = copy(larvae.depth)
-    traj_stage[:, 1] = copy(larvae.stage)
-    traj_dd[:, 1] = copy(current_degree_days)
-    traj_surv[:, 1] .= 1.0
+    # Current-step 1D working state vectors (decoupled from output cadence `save_stride`).
+    state_lon   = Float64.(copy(larvae.lon))
+    state_lat   = Float64.(copy(larvae.lat))
+    state_depth = Float64.(copy(larvae.depth))
+    state_stage = copy(larvae.stage)
+    state_surv  = fill(1.0, n_particles)
+    state_temp  = Vector{Float64}(undef, n_particles)
+
+    rel_times_s = isnothing(release_times) ? zeros(Float64, n_particles) : Float64.(release_times)
+    for p in 1:n_particles
+        if rel_times_s[p] > 0.0
+            state_stage[p] = :egg
+        end
+    end
 
     for p in 1:n_particles
         # Particles already at or above surface target have completed initial ascent
-        ascent_complete[p] = !enable_initial_ascent || (traj_depth[p, 1] >= ascent_target_depth)
+        ascent_complete[p] = !enable_initial_ascent || (state_depth[p] >= ascent_target_depth)
     end
 
     for p in 1:n_particles
         init_T = isnothing(temperature_fn) ? Float64(default_temperature) :
-                 temperature_fn(traj_lon[p, 1], traj_lat[p, 1], traj_depth[p, 1], 0.0)
-        traj_temp[p, 1] = init_T
+                 temperature_fn(state_lon[p], state_lat[p], state_depth[p], 0.0)
+        state_temp[p] = isfinite(init_T) ? Float64(init_T) : Float64(default_temperature)
         init_bed = isnothing(bathymetry_fn) ? Float64(default_bottom_depth) :
-                   bathymetry_fn(traj_lon[p, 1], traj_lat[p, 1])
-        t_bed_filtered[p] = isnothing(temperature_fn) ? Float64(default_temperature) :
-                            temperature_fn(traj_lon[p, 1], traj_lat[p, 1], init_bed, 0.0)
+                   bathymetry_fn(state_lon[p], state_lat[p])
+        init_bed_T = isnothing(temperature_fn) ? Float64(default_temperature) :
+                     temperature_fn(state_lon[p], state_lat[p], init_bed, 0.0)
+        t_bed_filtered[p] = isfinite(init_bed_T) ? Float64(init_bed_T) : state_temp[p]
     end
 
-    # Initialise cohort_molt column 1 explicitly. The matrix is `undef`, and the loop only writes
-    # column `s+1`, so leaving column 1 untouched would ship uninitialised memory as a reported
-    # cohort fraction.
+    # Record initial state at column 1 (t = 0).
+    out_idx = 1
+    out_times[1]    = times[1]
+    traj_lon[:, 1]   .= state_lon
+    traj_lat[:, 1]   .= state_lat
+    traj_depth[:, 1] .= state_depth
+    traj_temp[:, 1]  .= state_temp
+    traj_dd[:, 1]    .= current_degree_days
+    traj_surv[:, 1]  .= state_surv
+    traj_stage[:, 1] .= state_stage
+
+    # Initialise cohort_molt column 1 explicitly.
     if enable_molting
         cohort_molt[:, 1] .= cohort_transition_fractions(stage_reached)
     end
 
     for s in 1:(n_steps - 1)
         t_current = times[s]
-        # Every larva has terminated: nothing further can change, so stop and truncate rather
-        # than integrating the remaining steps for a cohort that is entirely dead or settled.
-        all(!, current_alive) && break
+        # Stop early once no active pelagic larvae remain (every larva is dead or settled).
+        any(p -> current_alive[p] && state_stage[p] != :instar1_settled, 1:n_particles) || break
         for p in 1:n_particles
             if !current_alive[p]
-                traj_lon[p, s + 1] = traj_lon[p, s]
-                traj_lat[p, s + 1] = traj_lat[p, s]
-                traj_depth[p, s + 1] = traj_depth[p, s]
-                traj_temp[p, s + 1] = traj_temp[p, s]
-                traj_dd[p, s + 1] = traj_dd[p, s]
-                traj_surv[p, s + 1] = 0.0
-                traj_stage[p, s + 1] = traj_stage[p, s]
+                state_surv[p] = 0.0
+                continue
+            end
+            # Settled benthic juveniles and larvae that exited the domain remain fixed.
+            if state_stage[p] == :instar1_settled || state_stage[p] == :off_domain
                 continue
             end
 
-            cur_lon = traj_lon[p, s]
-            cur_lat = traj_lat[p, s]
-            cur_depth = traj_depth[p, s]
-            cur_stage = traj_stage[p, s]
+            # Unhatched brooded eggs remain stationary on the seabed until their
+            # individual temperature-dependent hatch time is reached.
+            if state_stage[p] == :egg
+                if t_current < rel_times_s[p]
+                    cur_T_raw = isnothing(temperature_fn) ? Float64(default_temperature) :
+                                temperature_fn(state_lon[p], state_lat[p], state_depth[p], t_current)
+                    if isfinite(cur_T_raw)
+                        state_temp[p] = Float64(cur_T_raw)
+                        t_bed_filtered[p] = Float64(cur_T_raw)
+                    end
+                    continue
+                else
+                    state_stage[p] = :zoea1
+                    days_in_stage[p] = 0.0
+                    current_degree_days[p] = 0.0
+                    ascent_complete[p] = !enable_initial_ascent || (state_depth[p] >= ascent_target_depth)
+                end
+            end
 
-            # Query background velocity
-            u, v, w = velocity_fn(cur_lon, cur_lat, cur_depth, t_current)
+            cur_lon = state_lon[p]
+            cur_lat = state_lat[p]
+            cur_depth = state_depth[p]
+            cur_stage = state_stage[p]
+
+            # Query background velocity; guard against NaN at dry/masked boundary cells
+            u_raw, v_raw, w_raw = velocity_fn(cur_lon, cur_lat, cur_depth, t_current)
+            u = isfinite(u_raw) ? Float64(u_raw) : 0.0
+            v = isfinite(v_raw) ? Float64(v_raw) : 0.0
+            w = isfinite(w_raw) ? Float64(w_raw) : 0.0
 
             # Query temperature and seabed depth
-            cur_T = isnothing(temperature_fn) ? Float64(default_temperature) :
-                    temperature_fn(cur_lon, cur_lat, cur_depth, t_current)
+            cur_T_raw = isnothing(temperature_fn) ? Float64(default_temperature) :
+                        temperature_fn(cur_lon, cur_lat, cur_depth, t_current)
+            cur_T = isfinite(cur_T_raw) ? Float64(cur_T_raw) : state_temp[p]
             z_bed = isnothing(bathymetry_fn) ? Float64(default_bottom_depth) :
                     bathymetry_fn(cur_lon, cur_lat)
-            cur_bed_T = isnothing(temperature_fn) ? Float64(default_temperature) :
-                        temperature_fn(cur_lon, cur_lat, z_bed, t_current)
+            cur_bed_T_raw = isnothing(temperature_fn) ? Float64(default_temperature) :
+                            temperature_fn(cur_lon, cur_lat, z_bed, t_current)
+            cur_bed_T = isfinite(cur_bed_T_raw) ? Float64(cur_bed_T_raw) : t_bed_filtered[p]
 
             # High-resolution topographic gradient for kinematic steering (∂h/∂x, ∂h/∂y)
             bathy_grad = if !isnothing(bathymetry_fn) && is_lat_lon
@@ -2042,37 +2258,37 @@ function track_larval_cohort(
                 if rand(rng) > p_survive
                     current_alive[p] = false
                     cur_stage = :dead
-                    traj_surv[p, s + 1] = 0.0
-                else
-                    traj_surv[p, s + 1] = traj_surv[p, s]
+                    state_surv[p] = 0.0
                 end
             else
                 # Mean-field: survival reported as an expected fraction, no independent draws.
-                traj_surv[p, s + 1] = max(0.0, traj_surv[p, s] * exp(-mort_rate * dt_days))
+                state_surv[p] = max(0.0, state_surv[p] * exp(-mort_rate * dt_days))
             end
 
-            traj_temp[p, s + 1] = cur_T
+            state_temp[p] = cur_T
 
             if enable_molting && cur_stage != :instar1_settled
-                # The accumulated degree-days are PER STAGE and are reset at each ecdysis,
-                # which is the sibling IBM's convention: the requirement is quoted per
-                # stage, so the accumulation has to be per stage for the two to mean the
-                # same thing. The increment is scaled by the ecdysial thermal inhibition,
-                # so warm water slows development rather than merely gating it. Scaling
-                # the increment rather than the transition probability keeps the
-                # accumulation monotone, and a larva therefore can never regress a stage.
-                current_degree_days[p] += max(0.0, cur_T - temp_base_degreedays) * dt_days *
-                                          molt_thermal_inhibition(cur_T)
-                # Time spent in the present stage, for the calendar gate and the
-                # over-age penalty.
+                # Align pelagic larval development with TethysBio (`step_aggregate_groups!`):
+                # 1. Per-stage Arrhenius degree-day accumulation without benthic thermal inhibition
+                #    (pelagic larvae have their survival optimum at 10-12 °C).
+                # 2. Continuous Poisson-CDF daily transition hazard
+                #    `p_trans = 1 - exp(-h0 * cdf(Poisson(req), floor(DD)) * dt_days)`.
+                current_degree_days[p] += arrhenius_degree_day_increment(
+                    cur_T, dt_days; temp_base_degreedays = temp_base_degreedays
+                )
                 days_in_stage[p] += dt_days
-                new_stage = update_larval_stage(
-                    cur_stage,
-                    current_degree_days[p],
-                    molt_sched,
-                    developmental_u[p];
-                    days_in_stage = days_in_stage[p],
-                    min_stage_days = min_stage_days_for(cur_stage, intermolt_days_larval))
+                k_st = molt_stage_index(cur_stage)
+                new_stage = cur_stage
+                if k_st > 0
+                    req_dd = Float64(degree_days_larval[min(k_st + 1, length(degree_days_larval))])
+                    ready = req_dd > 0.0 ?
+                            cdf(Poisson(req_dd), floor(current_degree_days[p])) : 1.0
+                    p_trans = ready > 0.0 ?
+                              1.0 - exp(-Float64(aggregate_transition_hazard) * ready * dt_days) : 0.0
+                    if p_trans > 0.0 && rand(rng) < p_trans
+                        new_stage = k_st == 1 ? :zoea2 : k_st == 2 ? :megalopa : :instar1_settled
+                    end
+                end
 
                 # Settlement evaluation for competent larvae.
                 # Competence begins once a megalopa passes both its calendar gate and thermal
@@ -2119,13 +2335,14 @@ function track_larval_cohort(
                         cur_stage = :instar1_settled
                         days_in_stage[p] = 0.0
                         current_degree_days[p] = 0.0
-                        stage_survival[p] = traj_surv[p, s + 1]
+                        stage_survival[p] = state_surv[p]
                     elseif days_competent > competence_window_days
                         # Competence search window expired without reaching nursery habitat
                         current_settlement[p] = :settled_unsuitable
                         current_settlement_age[p] = t_current
                         current_alive[p] = false
-                        cur_stage = :megalopa
+                        state_surv[p] = 0.0
+                        cur_stage = :dead
                     else
                         # Delay settlement: competent larva continues pelagic search phase
                         current_settlement[p] = :pelagic
@@ -2135,7 +2352,7 @@ function track_larval_cohort(
                     if new_stage != cur_stage
                         days_in_stage[p] = 0.0
                         current_degree_days[p] = 0.0
-                        stage_survival[p] = traj_surv[p, s + 1]
+                        stage_survival[p] = state_surv[p]
                     end
                     cur_stage = new_stage
                 end
@@ -2147,8 +2364,6 @@ function track_larval_cohort(
             if stage_rank(cur_stage) > stage_rank(stage_reached[p])
                 stage_reached[p] = cur_stage
             end
-
-            traj_dd[p, s + 1] = current_degree_days[p]
 
             # Depth-dependent vertical diffusivity and Visser (1997) gradient drift
             local_kv = if !isnothing(κ_v_profile)
@@ -2216,48 +2431,71 @@ function track_larval_cohort(
                 end
             end
 
-            # Coastal landmass boundary condition: absorbing boundary via polygon ray-casting and bathymetry.
-            on_land = (is_lat_lon && is_point_on_land(new_lon, new_lat, coastline = coastline)) ||
-                      (!isnothing(bathymetry_fn) && bathymetry_fn(new_lon, new_lat) >= 0.0)
+            # Open-ocean domain-boundary exit rule: stop tracking larvae that move within
+            # the lateral boundary margin of the hydrodynamic domain.
+            if !isnothing(domain_interior_fn) && isfinite(new_lon) && isfinite(new_lat) &&
+               !domain_interior_fn(new_lon, new_lat)
+                state_lon[p] = cur_lon
+                state_lat[p] = cur_lat
+                state_depth[p] = cur_depth
+                state_stage[p] = :off_domain
+                current_settlement[p] = :off_domain
+                current_alive[p] = false
+                state_surv[p] = 0.0
+                continue
+            end
+
+            # Coastal landmass and hydrodynamic wet-domain boundary condition: reject steps
+            # onto land (coastline polygon or bathymetry >= 0) or outside wet hydrodynamic cells.
+            on_land = !isfinite(new_lon) || !isfinite(new_lat) ||
+                      (is_lat_lon && is_point_on_land(new_lon, new_lat, coastline = coastline)) ||
+                      (!isnothing(bathymetry_fn) && bathymetry_fn(new_lon, new_lat) >= 0.0) ||
+                      (!isnothing(wet_mask_fn) && !wet_mask_fn(new_lon, new_lat, new_depth))
             if on_land
                 new_lon = cur_lon
                 new_lat = cur_lat
             end
 
-            traj_lon[p, s + 1] = new_lon
-            traj_lat[p, s + 1] = new_lat
-            traj_depth[p, s + 1] = new_depth
-            traj_stage[p, s + 1] = cur_stage
+            state_lon[p] = new_lon
+            state_lat[p] = new_lat
+            state_depth[p] = new_depth
+            state_stage[p] = cur_stage
 
             # Mark as dead when cumulative survival probability falls below threshold
-            if traj_surv[p, s + 1] < min_survival_prob
+            if state_surv[p] < min_survival_prob
                 current_alive[p] = false
             end
         end
 
-        # Cohort-level transition fractions from the stage each larva has reached:
-        # (zoea1->zoea2, zoea2->megalopa, megalopa->instar1) at this step. These are the
-        # 0-to-1 fractions of the cohort that have completed each transition, and they are
-        # the direct check on the stage composition the trajectory records.
-        if enable_molting
-            cohort_molt[:, s + 1] .= cohort_transition_fractions(stage_reached)
-        end
         steps_done = s + 1
+        no_active_pelagic = !any(p -> current_alive[p] && state_stage[p] != :instar1_settled, 1:n_particles)
+        should_record = (s % save_stride == 0) || (s == n_steps - 1) || no_active_pelagic
+        if should_record
+            out_idx += 1
+            out_times[out_idx] = times[s + 1]
+            traj_lon[:, out_idx]   .= state_lon
+            traj_lat[:, out_idx]   .= state_lat
+            traj_depth[:, out_idx] .= state_depth
+            traj_temp[:, out_idx]  .= state_temp
+            traj_dd[:, out_idx]    .= current_degree_days
+            traj_surv[:, out_idx]  .= state_surv
+            traj_stage[:, out_idx] .= state_stage
+            if enable_molting
+                cohort_molt[:, out_idx] .= cohort_transition_fractions(stage_reached)
+            end
+        end
     end
 
-    # Truncate the preallocated matrices to the steps actually integrated. When the cohort
-    # terminated early, columns beyond `steps_done` hold stale values from the initial fill and
-    # would misrepresent the trajectory as continuing to the full `total_duration`.
-    n_out = min(steps_done, n_steps)
-    traj_lon   = traj_lon[:,   1:n_out]
-    traj_lat   = traj_lat[:,   1:n_out]
-    traj_depth = traj_depth[:, 1:n_out]
-    traj_temp  = traj_temp[:,  1:n_out]
-    traj_dd    = traj_dd[:,     1:n_out]
-    traj_surv  = traj_surv[:,   1:n_out]
-    traj_stage = traj_stage[:, 1:n_out]
-    times_used = collect(times[1:n_out])
-    cohort_molt_out = cohort_molt[:, 1:n_out]
+    # Truncate the preallocated matrices to the recorded output columns.
+    traj_lon   = traj_lon[:,   1:out_idx]
+    traj_lat   = traj_lat[:,   1:out_idx]
+    traj_depth = traj_depth[:, 1:out_idx]
+    traj_temp  = traj_temp[:,  1:out_idx]
+    traj_dd    = traj_dd[:,    1:out_idx]
+    traj_surv  = traj_surv[:,  1:out_idx]
+    traj_stage = traj_stage[:, 1:out_idx]
+    times_used = out_times[1:out_idx]
+    cohort_molt_out = cohort_molt[:, 1:out_idx]
 
     return (
         lons = traj_lon,

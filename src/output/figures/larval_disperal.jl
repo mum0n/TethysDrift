@@ -44,25 +44,55 @@ function plot_particle_trajectories(
     trajectories::NamedTuple;
     bathymetry_data::Union{Nothing, NamedTuple} = nothing,
     strata::Union{Nothing, AbstractVector{<:NamedTuple}} = nothing,
+    coastline = nothing,
+    rotation_deg::Real = 0.0,
     title::AbstractString = "Snow Crab Larval Dispersal Trajectories",
     output_path::Union{Nothing, AbstractString} = "outputs/particle_trajectories.png",
     max_display_particles::Int = 100
 )
-    fig = Figure(size = (950, 720), fontsize = 13)
+    use_rot = abs(Float64(rotation_deg)) > 1e-3
+    bathy_mp = nothing
+    shelf_frame = nothing
+    if !isnothing(bathymetry_data)
+        elev = Float64.(bathymetry_data.elevation)
+        elev[elev .>= 0.0] .= NaN
+        bathy_mp = _prepare_map_fields(
+            bathymetry_data.lon, bathymetry_data.lat, elev, elev;
+            rotation_deg = rotation_deg
+        )
+        shelf_frame = bathy_mp.shelf_frame
+    elseif use_rot
+        fin_lo = filter(isfinite, vec(trajectories.lons))
+        fin_la = filter(isfinite, vec(trajectories.lats))
+        lon0 = isempty(fin_lo) ? -62.5 : mean(fin_lo)
+        lat0 = isempty(fin_la) ? 44.2 : mean(fin_la)
+        shelf_frame = (Float64(lon0), Float64(lat0), Float64(rotation_deg))
+    end
+
+    proj_pt(lo, la) = isnothing(shelf_frame) ?
+        (Float64(lo), Float64(la)) :
+        _lonlat_to_shelf_km(lo, la, shelf_frame[1], shelf_frame[2], shelf_frame[3])
+
+    xlabel_txt = isnothing(shelf_frame) ? "Longitude (°E)" :
+        "Along-Shelf Distance (km, $(round(Int, shelf_frame[3]))° CCW from E)"
+    ylabel_txt = isnothing(shelf_frame) ? "Latitude (°N)" : "Cross-Shelf Distance (km)"
+
+    fig = Figure(size = (980, 620), fontsize = 13)
     ax = Axis(
         fig[1, 1],
         title = title,
-        xlabel = "Longitude (°E)",
-        ylabel = "Latitude (°N)"
+        xlabel = xlabel_txt,
+        ylabel = ylabel_txt,
+        aspect = DataAspect()
     )
 
-    # 1. Plot background bathymetry if provided
-    if !isnothing(bathymetry_data)
+    # 1. Plot background bathymetry if provided (mask land >= 0 to NaN so land stays background)
+    if !isnothing(bathy_mp) && any(isfinite, bathy_mp.fields[1])
         co = contourf!(
             ax,
-            bathymetry_data.lon,
-            bathymetry_data.lat,
-            bathymetry_data.elevation,
+            bathy_mp.xs,
+            bathy_mp.ys,
+            bathy_mp.fields[1],
             colormap = :viridis,
             levels = 15
         )
@@ -88,10 +118,11 @@ function plot_particle_trajectories(
                     push!(poly_lons, poly_lons[1])
                     push!(poly_lats, poly_lats[1])
                 end
+                pts_s = [proj_pt(poly_lons[i], poly_lats[i]) for i in eachindex(poly_lons)]
                 lines!(
                     ax,
-                    poly_lons,
-                    poly_lats,
+                    first.(pts_s),
+                    last.(pts_s),
                     color = (:gold, 0.75),
                     linewidth = 1.8,
                     linestyle = :dash
@@ -103,34 +134,41 @@ function plot_particle_trajectories(
     # 3. Plot larval tracks with high-visibility outline underlay and vivid color
     n_particles = size(trajectories.lons, 1)
     n_plot = min(n_particles, max_display_particles)
+    track_xs = Vector{Vector{Float64}}(undef, n_plot)
+    track_ys = Vector{Vector{Float64}}(undef, n_plot)
+    for p in 1:n_plot
+        nt_p = size(trajectories.lons, 2)
+        xs_p = Vector{Float64}(undef, nt_p)
+        ys_p = Vector{Float64}(undef, nt_p)
+        for t in 1:nt_p
+            lo, la = trajectories.lons[p, t], trajectories.lats[p, t]
+            if isfinite(lo) && isfinite(la)
+                xs_p[t], ys_p[t] = proj_pt(lo, la)
+            else
+                xs_p[t], ys_p[t] = NaN, NaN
+            end
+        end
+        track_xs[p] = xs_p
+        track_ys[p] = ys_p
+    end
 
     # High-contrast dark shadow underlay
     for p in 1:n_plot
-        lines!(
-            ax,
-            trajectories.lons[p, :],
-            trajectories.lats[p, :],
-            color = (:black, 0.75),
-            linewidth = 3.8
-        )
+        lines!(ax, track_xs[p], track_ys[p], color = (:black, 0.75), linewidth = 3.8)
     end
 
     # Vivid foreground trajectory lines
     for p in 1:n_plot
-        lines!(
-            ax,
-            trajectories.lons[p, :],
-            trajectories.lats[p, :],
-            color = :cyan,
-            linewidth = 2.2
-        )
+        lines!(ax, track_xs[p], track_ys[p], color = :cyan, linewidth = 2.2)
     end
 
     # 4. Mark release positions (start) and final drift positions (end) with strokes
+    rel_x = [track_xs[p][1] for p in 1:n_plot]
+    rel_y = [track_ys[p][1] for p in 1:n_plot]
+    end_x = [track_xs[p][end] for p in 1:n_plot]
+    end_y = [track_ys[p][end] for p in 1:n_plot]
     scatter!(
-        ax,
-        trajectories.lons[1:n_plot, 1],
-        trajectories.lats[1:n_plot, 1],
+        ax, rel_x, rel_y,
         color = :springgreen,
         strokecolor = :black,
         strokewidth = 1.5,
@@ -139,9 +177,7 @@ function plot_particle_trajectories(
         label = "Release (t = 0)"
     )
     scatter!(
-        ax,
-        trajectories.lons[1:n_plot, end],
-        trajectories.lats[1:n_plot, end],
+        ax, end_x, end_y,
         color = :crimson,
         strokecolor = :white,
         strokewidth = 1.5,
@@ -149,6 +185,20 @@ function plot_particle_trajectories(
         markersize = 12,
         label = "Final Position"
     )
+
+    _overlay_coastline!(ax, coastline; shelf_frame = shelf_frame)
+    if !isnothing(bathy_mp)
+        xlims!(ax, bathy_mp.xs[1], bathy_mp.xs[end])
+        ylims!(ax, bathy_mp.ys[1], bathy_mp.ys[end])
+    elseif !isnothing(coastline)
+        fin_x = filter(isfinite, reduce(vcat, track_xs; init = Float64[]))
+        fin_y = filter(isfinite, reduce(vcat, track_ys; init = Float64[]))
+        if !isempty(fin_x) && !isempty(fin_y)
+            pad = isnothing(shelf_frame) ? 0.5 : 25.0
+            xlims!(ax, minimum(fin_x) - pad, maximum(fin_x) + pad)
+            ylims!(ax, minimum(fin_y) - pad, maximum(fin_y) + pad)
+        end
+    end
 
     axislegend(ax, position = :rb)
 
@@ -368,17 +418,11 @@ function plot_larval_dispersal_density(
     trajectories::NamedTuple;
     lon_bins = range(-68.0, -57.0, length = 100),
     lat_bins = range(41.0, 48.0, length = 100),
+    coastline = nothing,
+    rotation_deg::Real = 0.0,
     title::AbstractString = "Larval Settlement Density Kernel",
     output_path::Union{Nothing, AbstractString} = "outputs/settlement_density.png"
 )
-    fig = Figure(size = (850, 650), fontsize = 13)
-    ax = Axis(
-        fig[1, 1],
-        title = title,
-        xlabel = "Longitude (°E)",
-        ylabel = "Latitude (°N)"
-    )
-
     end_lons = trajectories.lons[:, end]
     end_lats = trajectories.lats[:, end]
     n_p = length(end_lons)
@@ -399,11 +443,33 @@ function plot_larval_dispersal_density(
 
     density ./= max(1.0, sum(density))
     density .*= 100.0
+    density[density .<= 0.0] .= NaN
 
     lon_centers = [(lon_bins[i] + lon_bins[i + 1]) / 2.0 for i in 1:nx]
     lat_centers = [(lat_bins[j] + lat_bins[j + 1]) / 2.0 for j in 1:ny]
+    mp = _prepare_map_fields(
+        lon_centers, lat_centers, density, density;
+        rotation_deg = rotation_deg, nearest = true
+    )
+    dens_p = mp.fields[1]
 
-    hm = heatmap!(ax, lon_centers, lat_centers, density, colormap = :inferno)
+    fig = Figure(size = (950, 560), fontsize = 13)
+    ax = Axis(
+        fig[1, 1],
+        title = title,
+        xlabel = mp.xlabel,
+        ylabel = mp.ylabel,
+        aspect = DataAspect()
+    )
+    hm = heatmap!(
+        ax, mp.xs, mp.ys, dens_p;
+        colormap = :inferno,
+        colorrange = _finite_colorrange(dens_p; fallback = (0.0, 1.0)),
+        nan_color = :transparent
+    )
+    _overlay_coastline!(ax, coastline; shelf_frame = mp.shelf_frame)
+    xlims!(ax, mp.xs[1], mp.xs[end])
+    ylims!(ax, mp.ys[1], mp.ys[end])
     Colorbar(fig[1, 2], hm, label = "Settlement Density (%)")
 
     if !isnothing(output_path)
@@ -433,23 +499,37 @@ Plot empirical velocity vector arrows over the empirical turbulent diffusivity f
 """
 function plot_empirical_movement_field(
     emp_mov::NamedTuple;
+    coastline = nothing,
+    rotation_deg::Real = 0.0,
     title::AbstractString = "Empirical Advection & Turbulent Diffusivity Field",
     output_path::Union{Nothing, AbstractString} = "outputs/empirical_movement.png"
 )
-    fig = Figure(size = (850, 650), fontsize = 13)
+    lon_c = emp_mov.lon_centers
+    lat_c = emp_mov.lat_centers
+    diff = Float64.(emp_mov.diffusivity)
+    diff[(emp_mov.sample_count .<= 0) .| (diff .<= 0.0)] .= NaN
+
+    mp = _prepare_map_fields(
+        lon_c, lat_c, diff, diff;
+        rotation_deg = rotation_deg, nearest = true
+    )
+    diff_p = mp.fields[1]
+
+    fig = Figure(size = (950, 560), fontsize = 13)
     ax = Axis(
         fig[1, 1],
         title = title,
-        xlabel = "Longitude (°E)",
-        ylabel = "Latitude (°N)"
+        xlabel = mp.xlabel,
+        ylabel = mp.ylabel,
+        aspect = DataAspect()
     )
 
-    lon_c = emp_mov.lon_centers
-    lat_c = emp_mov.lat_centers
-    diff = copy(emp_mov.diffusivity)
-    diff[isnan.(diff)] .= 0.0
-
-    hm = heatmap!(ax, lon_c, lat_c, diff, colormap = :viridis)
+    hm = heatmap!(
+        ax, mp.xs, mp.ys, diff_p;
+        colormap = :viridis,
+        colorrange = _finite_colorrange(diff_p; fallback = (0.0, 1.0)),
+        nan_color = :transparent
+    )
     Colorbar(fig[1, 2], hm, label = "Empirical Diffusivity D (m² s⁻¹)")
 
     pts = Point2f[]
@@ -459,8 +539,18 @@ function plot_empirical_movement_field(
 
     for i in 1:length(lon_c), j in 1:length(lat_c)
         if !isnan(u_m[i, j]) && !isnan(v_m[i, j]) && emp_mov.sample_count[i, j] > 2
-            push!(pts, Point2f(lon_c[i], lat_c[j]))
-            push!(dirs, Vec2f(u_m[i, j] * 0.5, v_m[i, j] * 0.5))
+            if isnothing(mp.shelf_frame)
+                push!(pts, Point2f(lon_c[i], lat_c[j]))
+                push!(dirs, Vec2f(u_m[i, j] * 0.5, v_m[i, j] * 0.5))
+            else
+                lon0, lat0, rdeg = mp.shelf_frame
+                xk, yk = _lonlat_to_shelf_km(lon_c[i], lat_c[j], lon0, lat0, rdeg)
+                c_r, s_r = cosd(rdeg), sind(rdeg)
+                ur = u_m[i, j] * c_r + v_m[i, j] * s_r
+                vr = -u_m[i, j] * s_r + v_m[i, j] * c_r
+                push!(pts, Point2f(xk, yk))
+                push!(dirs, Vec2f(ur * 45.0, vr * 45.0))
+            end
         end
     end
 
@@ -489,6 +579,10 @@ function plot_empirical_movement_field(
             )
         end
     end
+
+    _overlay_coastline!(ax, coastline; shelf_frame = mp.shelf_frame)
+    xlims!(ax, mp.xs[1], mp.xs[end])
+    ylims!(ax, mp.ys[1], mp.ys[end])
 
     if !isnothing(output_path)
         mkpath(dirname(output_path))
@@ -571,36 +665,59 @@ Plot a two-panel map showing accumulated thermal degree-days and mean exposure t
 """
 function plot_thermal_exposure_map(
     therm_met::NamedTuple;
+    coastline = nothing,
+    rotation_deg::Real = 0.0,
     title::AbstractString = "Larval Thermal Exposure & Degree-Days",
     output_path::Union{Nothing, AbstractString} = "outputs/thermal_exposure.png"
 )
-    fig = Figure(size = (1100, 500), fontsize = 12)
-
     lon_c = therm_met.lon_centers
     lat_c = therm_met.lat_centers
+    dd = Float64.(therm_met.mean_degree_days)
+    temp = Float64.(therm_met.mean_exposure_temperature)
+    mp = _prepare_map_fields(
+        lon_c, lat_c, dd, dd, temp;
+        rotation_deg = rotation_deg, nearest = true
+    )
+    dd_p, temp_p = mp.fields[1], mp.fields[2]
+
+    fig = Figure(size = (1200, 480), fontsize = 12)
 
     # Panel 1: Accumulated Degree-Days
     ax1 = Axis(
         fig[1, 1],
         title = "Mean Cumulative Degree-Days (°C·days)",
-        xlabel = "Longitude (°E)",
-        ylabel = "Latitude (°N)"
+        xlabel = mp.xlabel,
+        ylabel = mp.ylabel,
+        aspect = DataAspect()
     )
-    dd = copy(therm_met.mean_degree_days)
-    dd[isnan.(dd)] .= 0.0
-    hm1 = heatmap!(ax1, lon_c, lat_c, dd, colormap = :inferno)
+    hm1 = heatmap!(
+        ax1, mp.xs, mp.ys, dd_p;
+        colormap = :inferno,
+        colorrange = _finite_colorrange(dd_p; fallback = (0.0, 1.0)),
+        nan_color = :transparent
+    )
+    _overlay_coastline!(ax1, coastline; shelf_frame = mp.shelf_frame)
+    xlims!(ax1, mp.xs[1], mp.xs[end])
+    ylims!(ax1, mp.ys[1], mp.ys[end])
     Colorbar(fig[1, 2], hm1, label = "Degree-Days (°C·d)")
 
     # Panel 2: Mean Ambient Exposure Temperature
     ax2 = Axis(
         fig[1, 3],
         title = "Mean Exposure Temperature (°C)",
-        xlabel = "Longitude (°E)",
-        ylabel = "Latitude (°N)"
+        xlabel = mp.xlabel,
+        ylabel = mp.ylabel,
+        aspect = DataAspect()
     )
-    temp = copy(therm_met.mean_exposure_temperature)
-    temp[isnan.(temp)] .= 0.0
-    hm2 = heatmap!(ax2, lon_c, lat_c, temp, colormap = :thermal)
+    hm2 = heatmap!(
+        ax2, mp.xs, mp.ys, temp_p;
+        colormap = :thermal,
+        colorrange = _finite_colorrange(temp_p; fallback = (0.0, 15.0)),
+        nan_color = :transparent
+    )
+    _overlay_coastline!(ax2, coastline; shelf_frame = mp.shelf_frame)
+    xlims!(ax2, mp.xs[1], mp.xs[end])
+    ylims!(ax2, mp.ys[1], mp.ys[end])
     Colorbar(fig[1, 4], hm2, label = "Temperature (°C)")
 
     if !isnothing(output_path)
@@ -622,32 +739,62 @@ Plot a multi-panel spatial distribution of spawning release, settlement density,
 """
 function plot_recruitment_summary(
     rec_met::NamedTuple;
+    coastline = nothing,
+    rotation_deg::Real = 0.0,
     title::AbstractString = "Larval Recruitment & Retention Summary",
     output_path::Union{Nothing, AbstractString} = "outputs/recruitment_summary.png"
 )
-    fig = Figure(size = (1100, 500), fontsize = 12)
     lon_c = rec_met.lon_centers
     lat_c = rec_met.lat_centers
+    dens = Float64.(rec_met.settlement_density)
+    dens[dens .<= 0.0] .= NaN
+    succ_pct = Float64.(rec_met.success_rate) .* 100.0
+    succ_pct[(rec_met.settlement_density .<= 0.0) .& (succ_pct .<= 0.0)] .= NaN
+
+    mp = _prepare_map_fields(
+        lon_c, lat_c, dens, dens, succ_pct;
+        rotation_deg = rotation_deg, nearest = true
+    )
+    dens_p, succ_p = mp.fields[1], mp.fields[2]
+
+    fig = Figure(size = (1200, 480), fontsize = 12)
 
     # Panel 1: Settlement Density
     ax1 = Axis(
         fig[1, 1],
         title = "Settlement Density (count)",
-        xlabel = "Longitude (°E)",
-        ylabel = "Latitude (°N)"
+        xlabel = mp.xlabel,
+        ylabel = mp.ylabel,
+        aspect = DataAspect()
     )
-    hm1 = heatmap!(ax1, lon_c, lat_c, rec_met.settlement_density, colormap = :plasma)
+    hm1 = heatmap!(
+        ax1, mp.xs, mp.ys, dens_p;
+        colormap = :plasma,
+        colorrange = _finite_colorrange(dens_p; fallback = (0.0, 1.0)),
+        nan_color = :transparent
+    )
+    _overlay_coastline!(ax1, coastline; shelf_frame = mp.shelf_frame)
+    xlims!(ax1, mp.xs[1], mp.xs[end])
+    ylims!(ax1, mp.ys[1], mp.ys[end])
     Colorbar(fig[1, 2], hm1, label = "Settled Larvae")
 
     # Panel 2: Recruitment Success Rate
     ax2 = Axis(
         fig[1, 3],
         title = "Benthic Recruitment Success Rate (%)",
-        xlabel = "Longitude (°E)",
-        ylabel = "Latitude (°N)"
+        xlabel = mp.xlabel,
+        ylabel = mp.ylabel,
+        aspect = DataAspect()
     )
-    succ_pct = rec_met.success_rate .* 100.0
-    hm2 = heatmap!(ax2, lon_c, lat_c, succ_pct, colormap = :viridis)
+    hm2 = heatmap!(
+        ax2, mp.xs, mp.ys, succ_p;
+        colormap = :viridis,
+        colorrange = _finite_colorrange(succ_p; fallback = (0.0, 100.0)),
+        nan_color = :transparent
+    )
+    _overlay_coastline!(ax2, coastline; shelf_frame = mp.shelf_frame)
+    xlims!(ax2, mp.xs[1], mp.xs[end])
+    ylims!(ax2, mp.ys[1], mp.ys[end])
     Colorbar(fig[1, 4], hm2, label = "Success Rate (%)")
 
     if !isnothing(output_path)
@@ -678,6 +825,8 @@ function plot_bottom_temperature_map(
     depth::Union{Nothing, Real} = nothing,
     domain_lon::Tuple{<:Real, <:Real} = (-71.0, -53.0),
     domain_lat::Tuple{<:Real, <:Real} = (40.0, 48.5),
+    coastline = nothing,
+    rotation_deg::Real = 0.0,
     title::Union{Nothing, AbstractString} = nothing,
     output_path::Union{Nothing, AbstractString} = "outputs/bottom_temperature_map.png"
 )
@@ -688,25 +837,36 @@ function plot_bottom_temperature_map(
     )
     zs = collect(Float64, f.depths)
     k = isnothing(depth) ? argmin(zs) : argmin(abs.(zs .- Float64(depth)))
-    Tbot = f.temperature[:, :, k]
-    finite_vals = filter(isfinite, vec(Tbot))
-    cr = if isempty(finite_vals)
-        (0.0, 1.0)
-    else
-        lo, hi = extrema(finite_vals)
-        lo == hi ? (lo - 0.5, hi + 0.5) : (lo, hi)
+    Tbot = Float64.(f.temperature[:, :, k])
+    if hasproperty(f, :bathymetry) && !isnothing(f.bathymetry)
+        mask_bathy!(Tbot, f.bathymetry, k)
     end
-    fig = Figure(size = (760, 520), fontsize = 12)
+    mp = _prepare_map_fields(f.lons, f.lats, Tbot, Tbot; rotation_deg = rotation_deg)
+    Tbot_p = mp.fields[1]
+    cr = _finite_colorrange(Tbot_p; fallback = (0.0, 1.0))
+    fig = Figure(size = (950, 520), fontsize = 12)
     ax = Axis(
         fig[1, 1],
         title = something(
             title,
             "Near-Bed Temperature (deepest resolved level, $(zs[k]) m)"
         ),
-        xlabel = "Longitude (°E)",
-        ylabel = "Latitude (°N)"
+        xlabel = mp.xlabel,
+        ylabel = mp.ylabel,
+        aspect = DataAspect()
     )
-    hm = heatmap!(ax, f.lons, f.lats, Tbot; colormap = :thermal, colorrange = cr)
+    hm = heatmap!(
+        ax, mp.xs, mp.ys, Tbot_p;
+        colormap = :thermal,
+        colorrange = cr,
+        nan_color = :transparent
+    )
+    _overlay_coastline!(ax, coastline; shelf_frame = mp.shelf_frame)
+    if isnothing(mp.shelf_frame)
+        _focus_wet_limits!(ax, mp.xs, mp.ys, Tbot_p)
+    else
+        xlims!(ax, mp.xs[1], mp.xs[end]); ylims!(ax, mp.ys[1], mp.ys[end])
+    end
     Colorbar(fig[1, 2], hm, label = "Temperature (°C)")
     isnothing(output_path) || (mkpath(dirname(output_path)); save(output_path, fig))
     return fig

@@ -162,6 +162,8 @@ function configuration_to_options(config_dict::AbstractDict;
     hydro_start_days = Float64(get_val("biology", "hydro_start_days", 0.0))
     track_dt  = Float64(get_val("biology", "track_dt_seconds", 300.0))
     min_depth = Float64(get_val("biology", "min_seabed_depth", 100.0))
+    max_depth_raw = Float64(get_val("biology", "max_seabed_depth", 0.0))
+    max_depth = max_depth_raw <= 0.0 ? Inf : max_depth_raw
     diff_h    = Float64(get_val("biology", "diffusivity_h", 10.0))
     diff_v    = Float64(get_val("biology", "diffusivity_v", 1e-4))
 
@@ -457,6 +459,7 @@ function configuration_to_options(config_dict::AbstractDict;
         settlement_max_depth = settlement_max_depth,
         settlement_max_temp = settlement_max_temp,
         min_seabed_depth = min_depth,
+        max_seabed_depth = max_depth,
         buffer_km = buffer_km,
         release_depth_mode = rel_mode,
         bottom_release_offset = b_offset,
@@ -596,6 +599,7 @@ function options_to_configuration(opts::HydrodynamicOptions)::Dict{String, Any}
             "hydro_start_days" => opts.hydro_start_days,
             "track_dt_seconds" => opts.track_dt,
             "min_seabed_depth" => opts.min_seabed_depth,
+            "max_seabed_depth" => isfinite(opts.max_seabed_depth) ? opts.max_seabed_depth : 0.0,
             "buffer_km" => opts.buffer_km,
             "diffusivity_h" => opts.diffusivity_h,
             "diffusivity_v" => opts.diffusivity_v,
@@ -781,6 +785,7 @@ function to_larval_config(opts::HydrodynamicOptions; kwargs...)::LarvalDispersal
         :diffusivity_h            => opts.diffusivity_h,
         :diffusivity_v            => opts.diffusivity_v,
         :min_seabed_depth         => opts.min_seabed_depth,
+        :max_seabed_depth         => opts.max_seabed_depth,
         :buffer_km                => opts.buffer_km,
         :release_depth_mode       => opts.release_depth_mode,
         :bottom_release_offset    => opts.bottom_release_offset,
@@ -828,7 +833,7 @@ function to_larval_config(opts::HydrodynamicOptions; kwargs...)::LarvalDispersal
         Int(d[:n_particles]), Float64(d[:track_duration_seconds]),
         Float64(d[:track_dt_seconds]), Float64(d[:diffusivity_h]),
         Float64(d[:diffusivity_v]), Float64(d[:min_seabed_depth]),
-        Float64(d[:buffer_km]), Symbol(d[:release_depth_mode]),
+        Float64(d[:max_seabed_depth]), Float64(d[:buffer_km]), Symbol(d[:release_depth_mode]),
         (Float64(d[:bottom_release_offset][1]), Float64(d[:bottom_release_offset][2])),
         Bool(d[:enable_initial_ascent]), Float64(d[:ascent_speed]),
         Float64(d[:ascent_target_depth]), Bool(d[:enable_dvm]),

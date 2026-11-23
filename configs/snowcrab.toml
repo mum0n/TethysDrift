@@ -62,11 +62,12 @@ buffer_km = 50.0              # Release buffer margin around domain / strata (km
 
 [biology]
 # Snow crab larval cohort advection and behavior
-n_particles = 500             # Larval particle cohort size
-track_duration_days = 547.5   # Full 1.5-yr hydrodynamic span (days; <= 0 uses full span)
-hydro_start_days = 0.0        # Additional offset (days) past store.times[1] before release
+n_particles = 600             # Larval particle cohort size
+track_duration_days = 340.0   # Jan 1 - Dec 7, 2021 tracking horizon (days; <= 0 uses full remaining span)
+hydro_start_days = 207.0      # Offset (days) past June 8, 2020 post-spinup store.times[1] so Day 1 = 2021-01-01 (2020 leap year)
 track_dt_seconds = 300.0      # Advection time step in seconds (5 minutes)
 min_seabed_depth = 50.0       # Minimum release water depth (m)
+max_seabed_depth = 300.0      # Maximum release water depth (m; restricts spawning to continental shelf)
 diffusivity_h = 10.0          # Horizontal eddy diffusivity (m^2/s)
 diffusivity_v = 1.0e-4        # Vertical eddy diffusivity (m^2/s)
 release_depth_mode = "bottom" # Release stratum: "bottom"
@@ -108,11 +109,11 @@ degree_days_larval = [0.0, 270.0, 270.0, 270.0]
                               # Per-stage degree-days to molt, reset at each ecdysis
 intermolt_days_larval = [0.0, 36.0, 36.0, 42.0]
                               # Per-stage minimum duration (days): the calendar gate
-larval_baseline_hazards = [0.010, 0.010, 0.0075]
-                              # Baseline daily mortality (day^-1): zoea I, zoea II, megalopa
+larval_baseline_hazards = [0.0, 0.0, 0.0]
+                              # Pelagic natural mortality disabled (day^-1); settlement-habitat mortality remains active
 larval_temp_opt = 11.0        # The pelagic survival optimum (°C)
 larval_temp_sigma = 3.5       # The width of that optimum (°C)
-larval_overage_hazard = 0.05  # Daily penalty per 10 days beyond the viable stage duration
+larval_overage_hazard = 0.05  # Daily penalty per 10 days past max_intermolt_days (0 for <= 84 d; removes developmentally arrested warm-water larvae)
 larval_max_intermolt_days = 84.0  # The maximum viable duration of a pelagic stage (days)
 settlement_min_depth = -500.0 # Deep bathymetric boundary for benthic settlement (m)
 settlement_max_depth = -10.0  # Shallow bathymetric boundary for benthic settlement (m)

@@ -103,16 +103,36 @@ function plot_multi_panel_dashboard(
     speed_surf = Float64.(hydro.speed[:, :, k_surf] .* 100.0)
     mask_bathy!(speed_surf, bathy, k_surf)
     hm1 = heatmap!(ax1, lons, lats, speed_surf, colormap = :viridis, nan_color = :transparent)
-    arrows2d!(
-        ax1,
-        lons[1:3:end],
-        lats[1:3:end],
-        Float64.(hydro.u[:, :, k_surf][1:3:end, 1:3:end] .* 100.0),
-        Float64.(hydro.v[:, :, k_surf][1:3:end, 1:3:end] .* 100.0);
-        tipwidth = 8,
-        tiplength = 8,
-        color = :white
-    )
+    max_spd1 = let vals = filter(isfinite, speed_surf)
+        isempty(vals) ? 1.0 : max(1.0, maximum(vals))
+    end
+    stride1 = max(3, round(Int, max(length(lons), length(lats)) / 24))
+    ix1 = 1:stride1:length(lons)
+    iy1 = 1:stride1:length(lats)
+    dlon1 = length(ix1) > 1 ? abs(lons[ix1[end]] - lons[ix1[1]]) / (length(ix1) - 1) : 0.25
+    dlat1 = length(iy1) > 1 ? abs(lats[iy1[end]] - lats[iy1[1]]) / (length(iy1) - 1) : 0.25
+    scale1 = 0.85 * max(dlon1, dlat1) / max_spd1
+    pts1 = Point2f[]
+    dirs1 = Vec2f[]
+    u_surf = Float64.(hydro.u[:, :, k_surf] .* 100.0)
+    v_surf = Float64.(hydro.v[:, :, k_surf] .* 100.0)
+    for i in ix1, j in iy1
+        if isfinite(u_surf[i, j]) && isfinite(v_surf[i, j])
+            push!(pts1, Point2f(lons[i], lats[j]))
+            push!(dirs1, Vec2f(u_surf[i, j] * scale1, v_surf[i, j] * scale1))
+        end
+    end
+    if !isempty(pts1)
+        arrows2d!(
+            ax1,
+            pts1,
+            dirs1;
+            tipwidth = 6,
+            tiplength = 8,
+            shaftwidth = 1.2,
+            color = :white
+        )
+    end
     Colorbar(fig[1, 2], hm1, label = "cm/s", height = Relative(0.8))
 
     # Panel 2: Temperature + Isotherms

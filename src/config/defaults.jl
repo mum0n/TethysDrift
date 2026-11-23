@@ -194,6 +194,7 @@ function get_default_configuration()::Dict{String, Any}
             "hydro_start_days" => 0.0,
             "track_dt_seconds" => 300.0,
             "min_seabed_depth" => 100.0,
+            "max_seabed_depth" => 0.0,
             "buffer_km" => 100.0,
             "diffusivity_h" => 10.0,
             "diffusivity_v" => 1e-4,

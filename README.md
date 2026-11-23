@@ -44,7 +44,7 @@ Two, in `configs/` (the biology schema sections — `biology`, `dvm`,
 | config | purpose |
 |---|---|
 | `default.toml` | Cape Breton demonstration — small cohort, generic placeholder biology, tracked through the keyless ocean `default.toml` store. |
-| `snowcrab.toml` | Snow Crab production — 500-particle cohort over the 60-day pelagic larval duration, with snow-crab biology/DVM/degree-day parameters. |
+| `snowcrab.toml` | Snow Crab production — 500-particle sole annual cohort over the 547.5-day (1.5-yr) `TethysFlow` span, with Arrhenius-weighted Jan–Apr probabilistic hatching (`50–300 m` shelf depth), `TethysBio`-aligned Poisson-CDF molting, DVM, and benthic settlement filtering. |
 
 - **`[storage]`** is where the run reads and writes: `output_dir` (this package's results
   directory) and `ocean_model` (the realized ocean store to track through — the
@@ -74,23 +74,11 @@ Tethys.set_lakehouse_dir!("/path/to/shared/lakehouse")
 
 ## Results
 
-Trajectories, metrics and figures are written to this package's results store
-(`[storage] output_dir`, a Zarr store via the analysis layer) — separate from the input
-ocean store, which is read only.
-
-## Notes / known gaps
-
-- `run_segment_tracking(opts=…)` takes the ocean model's options type; the biology configs carry
-  the larval biology keys, and the ocean configuration is never loaded here — the store's own
-  metadata states the domain.
-- `Build` (`src/driver.jl`) is a deliberate marker: a local helper of the umbrella driver
-  whose body was never ported. It is uncalled; a run that needs it should port it explicitly.
-- `SimulationResult` (the ocean's `open_simulation_result`) is a separate metadata handover
-  that is defined but not yet written by a run; the live coupling is the store path.
+Trajectories, metrics, shelf-aligned (35° rotated) PNG diagnostic maps, and the canvas-backed interactive Leaflet dashboard (`interactive_larval_tracks.html` + zlib sidecar `.data.zz`) are written to `[storage] output_dir` — separate from the read-only input ocean store.
 
 ## Documentation
 
-- [`docs/TethysDrift.md`](docs/TethysDrift.md) — the full reference manual
-  (configuration, biology, analysis, storage, visualization).
-- [`docs/snow_crab_larval_connectivity_paper.md`](docs/snow_crab_larval_connectivity_paper.md)
-  — the snow-crab larval connectivity paper.
+- [`docs/TethysDrift.md`](docs/TethysDrift.md) — full reference manual (biophysical equations, configuration, analysis, storage, visualization).
+- [`docs/TethysDriftNotes.md`](docs/TethysDriftNotes.md) — concise biophysical equations, hatching/molting rules, and assumptions.
+- [`docs/github_pages.md`](docs/github_pages.md) — local viewing and GitHub Pages deployment for the interactive Leaflet dashboard.
+- [`docs/snow_crab_larval_connectivity_paper.md`](docs/snow_crab_larval_connectivity_paper.md) — snow-crab larval connectivity manuscript.

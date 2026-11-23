@@ -578,25 +578,39 @@ point-in-polygon classification and Leaflet/Makie visualizations.
 """
 function load_cfa_polygons(
     dir_path::AbstractString = "inputs";
-    intersect_coastline::Bool = true
+    intersect_coastline::Bool = false
 )
-    if !isdir(dir_path)
+    search_dirs = String[String(dir_path)]
+    pkg_docs = normpath(joinpath(@__DIR__, "..", "..", "docs"))
+    if pkg_docs != String(dir_path)
+        push!(search_dirs, pkg_docs)
+    end
+
+    resolved_dir = nothing
+    cfa_files = String[]
+    for d in search_dirs
+        isdir(d) || continue
+        found = filter(f -> occursin(r"^cfa.*\.dat$"i, f), readdir(d))
+        if !isempty(found)
+            resolved_dir = d
+            cfa_files = found
+            break
+        end
+    end
+
+    if isempty(cfa_files) || isnothing(resolved_dir)
         return NamedTuple[]
     end
 
-    all_files = readdir(dir_path)
-    cfa_files = filter(f -> occursin(r"^cfa.*\.dat$"i, f), all_files)
-    sort!(cfa_files) # Deterministic ordering
-
-    if isempty(cfa_files)
-        return NamedTuple[]
-    end
+    # Deterministic shelf order: CFA North (20-22) -> CFA South (23-24) -> CFA 4X -> others.
+    cfa_order = Dict("cfanorth" => 1, "cfa2022" => 1, "cfasouth" => 2, "cfa2324" => 2, "cfa4x" => 3)
+    sort!(cfa_files; by = f -> (get(cfa_order, lowercase(replace(f, r"\.dat$"i => "")), 99), lowercase(f)))
 
     palette = ["#3B82F6", "#10B981", "#F59E0B", "#8B5CF6", "#EC4899", "#06B6D4", "#F97316"]
     polygons = NamedTuple[]
 
     for (idx, filename) in enumerate(cfa_files)
-        filepath = joinpath(dir_path, filename)
+        filepath = joinpath(resolved_dir, filename)
         stem = lowercase(replace(filename, r"\.dat$"i => ""))
 
         lines = readlines(filepath)
@@ -733,13 +747,13 @@ function compute_empirical_connectivity(
     elseif isnothing(strata_classifier)
         auto_polys = load_cfa_polygons("inputs")
         if !isempty(auto_polys)
-            vcat(auto_polys, [(name = "Offshore / Slope", lon = (-68.0, -57.0), lat = (40.0, 43.0))])
+            vcat(auto_polys, [(name = "Outside / Offshore",)])
         else
             [
                 (name = "CFA 20-22 (Eastern NS)", lon = (-62.0, -57.0), lat = (44.5, 47.5)),
                 (name = "CFA 23-24 (Middle Shelf)", lon = (-64.5, -60.0), lat = (43.0, 45.5)),
                 (name = "CFA 4X (Southwest NS)", lon = (-68.0, -64.0), lat = (42.0, 44.5)),
-                (name = "Offshore / Slope", lon = (-68.0, -57.0), lat = (40.0, 43.0))
+                (name = "Outside / Offshore",)
             ]
         end
     else
@@ -1101,6 +1115,13 @@ function export_larval_dispersal_jld2(
         load_configuration()
     end
 
+    # Strip non-primitive `molt_schedule` (`Tuple{MoltCDF, ...}`), which is reconstructed
+    # deterministically from the archived configuration rather than serialized in Zarr.
+    trajs_serializable = Dict{String, Any}(
+        String(k) => (k === :molt_schedule ? nothing : getproperty(trajectories, k))
+        for k in propertynames(trajectories)
+    )
+
     target_path = endswith(lowercase(output_filename), ".jld2") ?
         replace(output_filename, r"\.jld2$"i => ".zarr") : String(output_filename)
     be = endswith(lowercase(target_path), ".arrow") || endswith(lowercase(target_path), ".feather") ?
@@ -1108,7 +1129,7 @@ function export_larval_dispersal_jld2(
     Tethys.write_data(
         target_path,
         Dict(
-            "trajectories" => trajectories,
+            "trajectories" => trajs_serializable,
             "empirical_movement" => emp_mov,
             "recruitment_metrics" => rec_met,
             "thermal_metrics" => therm_met,

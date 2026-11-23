@@ -127,6 +127,7 @@ struct HydrodynamicOptions
     settlement_max_depth     :: Float64
     settlement_max_temp      :: Float64
     min_seabed_depth         :: Float64
+    max_seabed_depth         :: Float64
     buffer_km                :: Float64
     release_depth_mode       :: Symbol
     bottom_release_offset    :: Tuple{Float64, Float64}
@@ -314,6 +315,7 @@ function HydrodynamicOptions(;
     settlement_max_depth  :: Real = -50.0,
     settlement_max_temp   :: Real = 6.0,
     min_seabed_depth      :: Real = 100.0,
+    max_seabed_depth      :: Real = Inf,
     buffer_km             :: Real = 100.0,
     release_depth_mode    :: Symbol = :bottom,
     bottom_release_offset :: Tuple{Real, Real} = (0.5, 3.0),
@@ -437,6 +439,7 @@ function HydrodynamicOptions(;
         Float64(settlement_max_depth),
         Float64(settlement_max_temp),
         Float64(min_seabed_depth),
+        (Float64(max_seabed_depth) <= 0.0 ? Inf : Float64(max_seabed_depth)),
         Float64(buffer_km),
         release_depth_mode,
         (Float64(bottom_release_offset[1]), Float64(bottom_release_offset[2])),
@@ -569,6 +572,7 @@ struct LarvalDispersalConfig
     diffusivity_h            :: Float64
     diffusivity_v            :: Float64
     min_seabed_depth         :: Float64
+    max_seabed_depth         :: Float64
     buffer_km                :: Float64
     release_depth_mode       :: Symbol
     bottom_release_offset    :: Tuple{Float64, Float64}

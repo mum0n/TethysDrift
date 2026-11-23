@@ -160,6 +160,7 @@ using Zarr
         @test TethysDrift.plot_particle_trajectories(
             trajs;
             strata = strata,
+            rotation_deg = 35.0,
             output_path = nothing
         ) !== nothing
     end
@@ -184,6 +185,53 @@ using Zarr
             :zoea1,
             TethysDrift.PELAGIC_INTERMOLT_DAYS
         ) == 36.0
+
+        # Arrhenius-weighted Jan-Apr sole-cohort probabilistic hatching times
+        @test isapprox(TethysDrift.arrhenius_hatch_rate(3.0), 1.0; atol = 1e-12)
+        @test TethysDrift.arrhenius_hatch_rate(6.0) > 1.0
+        @test 0.0 < TethysDrift.arrhenius_hatch_rate(0.0) < 1.0
+        rt_warm = TethysDrift.sample_brood_hatch_times(
+            fill(-62.0, 200), fill(44.5, 200), fill(-120.0, 200);
+            temperature_fn = (lo, la, z, t) -> 6.0,
+            origin_doy = 153.0,
+            total_duration = 547.5 * 86400.0,
+            rng = TethysDrift.Random.MersenneTwister(42)
+        )
+        rt_cold = TethysDrift.sample_brood_hatch_times(
+            fill(-62.0, 200), fill(44.5, 200), fill(-120.0, 200);
+            temperature_fn = (lo, la, z, t) -> 0.5,
+            origin_doy = 153.0,
+            total_duration = 547.5 * 86400.0,
+            rng = TethysDrift.Random.MersenneTwister(42)
+        )
+        @test length(rt_warm) == 200
+        @test (maximum(rt_warm) - minimum(rt_warm)) / 86400.0 <= 120.0
+        @test (maximum(rt_cold) - minimum(rt_cold)) / 86400.0 <= 120.0
+        @test (sum(rt_warm) / length(rt_warm)) < (sum(rt_cold) / length(rt_cold))  # Warmer benthic sites hatch earlier in Jan-Apr
+        @test maximum(rt_cold) <= (547.5 - 150.0) * 86400.0 + 1.0
+
+        # CFA polygons from docs/*.dat are loaded automatically in shelf order (North -> South -> 4X)
+        cfa_polys = TethysDrift.load_cfa_polygons("nonexistent_inputs_dir")
+        @test length(cfa_polys) == 3
+        @test [p.code for p in cfa_polys] == [:cfanorth, :cfasouth, :cfa4x]
+        @test length(cfa_polys[1].lons) == 15
+        @test length(cfa_polys[2].lons) == 26
+        @test length(cfa_polys[3].lons) == 28
+        # Verify point-in-polygon connectivity uses docs/*.dat polygons
+        conn_trajs = (
+            lons = [-59.5 -59.5; -60.5 -60.5; -65.0 -65.0],
+            lats = [46.5 46.5; 44.0 44.0; 42.5 42.5],
+            depths = [-100.0 -100.0; -100.0 -100.0; -100.0 -100.0],
+            stages = [:zoea1 :instar1_settled; :zoea1 :instar1_settled; :zoea1 :instar1_settled],
+            alive = [true, true, true],
+            survival_probability = [1.0 1.0; 1.0 1.0; 1.0 1.0],
+            times = [0.0, 3600.0]
+        )
+        conn_res = TethysDrift.compute_empirical_connectivity(conn_trajs)
+        @test conn_res.strata_names[1:3] == ["CFA North (CFA 20-22)", "CFA South (CFA 23-24)", "CFA 4X (Southwest NS)"]
+        @test conn_res.counts_matrix[1, 1] == 1
+        @test conn_res.counts_matrix[2, 2] == 1
+        @test conn_res.counts_matrix[3, 3] == 1
 
         # End-to-end initialize_larval_particles + track_larval_cohort smoke test
         particles = TethysDrift.initialize_larval_particles(
@@ -233,6 +281,15 @@ using Zarr
             @test isfile(sidecar_path)
             html_text = read(html_path, String)
             @test occursin("const SIDECAR_FILE = \"tracks.data.zz\";", html_text)
+            @test occursin("id=\"nearest-n-input\"", html_text)
+            @test occursin("function selectNearestReleases", html_text)
+            @test occursin("id=\"ui-tooltip\"", html_text)
+            @test occursin("data-tip=", html_text)
+            @test occursin("window.location.protocol === \"file:\"", html_text)
+            @test occursin("AbortController", html_text)
+            @test occursin("rows.join(\"\\n\")", html_text)
+            @test occursin("id=\"header-date\"", html_text)
+            @test occursin("function formatNominalDate", html_text)
             @test !occursin("const RUNS = {", html_text)
             @test !occursin("Demographics & Zones", html_text)
             @test !occursin("const STRATA =", html_text)
@@ -257,6 +314,16 @@ using Zarr
             )
             @test isfile(nc_path)
 
+            zarr_analysis_path = joinpath(tmp, "analysis.zarr")
+            TethysDrift.export_larval_dispersal_jld2(
+                zarr_analysis_path;
+                trajectories = res,
+                lon_bins = range(-64.0, -62.0; length = 4),
+                lat_bins = range(44.0, 45.0; length = 4),
+                config = cfg
+            )
+            @test isdir(zarr_analysis_path)
+
             hydro_snap = (
                 lons = collect(-65.0:0.5:-62.0),
                 lats = collect(43.0:0.5:45.0),
@@ -279,8 +346,28 @@ using Zarr
         snow_cfg = TethysDrift.configuration_to_options(
             TethysDrift.load_config(joinpath(@__DIR__, "..", "configs", "snowcrab.toml"))
         )
-        @test snow_cfg.track_duration ≈ 547.5 * 86400.0
-        @test snow_cfg.hydro_start_days == 0.0
+        @test snow_cfg.track_duration ≈ 340.0 * 86400.0
+        @test snow_cfg.hydro_start_days == 207.0
+
+        # Domain-boundary exit rule marks exiting larvae as :off_domain and stops tracking them
+        p_exit = TethysDrift.initialize_larval_particles(
+            1; lon_range = (-63.0, -63.0), lat_range = (44.0, 44.0)
+        )
+        res_exit = TethysDrift.track_larval_cohort(
+            p_exit;
+            velocity_fn = (lo, la, z, t) -> (0.5, 0.0, 0.0),
+            temperature_fn = (lo, la, z, t) -> 5.0,
+            bathymetry_fn = (lo, la) -> -100.0,
+            domain_interior_fn = (lo, la) -> lo <= -62.95,
+            total_duration = 3600.0 * 12,
+            dt = 1800.0,
+            κ_h = 0.0,
+            κ_v = 0.0,
+            enable_molting = false
+        )
+        @test res_exit.settlement_status[1] == :off_domain
+        @test res_exit.stages[1, end] == :off_domain
+        @test res_exit.alive[1] == false
 
         mktempdir() do tmp
             zpath = joinpath(tmp, "offset_hydro.zarr")
@@ -314,5 +401,58 @@ using Zarr
             @test interp(-63.5, 44.5, -25.0, span[1]).u ≈ 2.0
             @test interp(-63.5, 44.5, -25.0, span[1] + 43200.0).u ≈ 2.5
         end
+    end
+
+    @testset "Wet-domain mask at spawn and advection" begin
+        rng = TethysDrift.Random.MersenneTwister(123)
+        wet_fn = (lon, lat, z) -> (lon >= -63.0 && lon <= -61.0 && lat >= 43.0 && lat <= 45.0)
+        bathy_fn = (lon, lat) -> -120.0
+        larvae = TethysDrift.initialize_larval_particles(
+            20;
+            lon_range = (-65.0, -60.0),
+            lat_range = (42.0, 46.0),
+            min_seabed_depth = 50.0,
+            bathymetry = bathy_fn,
+            wet_mask_fn = wet_fn,
+            rng = rng
+        )
+        @test all(i -> wet_fn(larvae.lon[i], larvae.lat[i], larvae.depth[i]), 1:20)
+
+        vel_fn = (lon, lat, z, t) -> wet_fn(lon, lat, z) ? (0.5, 0.5, 0.0) : (NaN, NaN, NaN)
+        tr = TethysDrift.track_larval_cohort(
+            larvae;
+            velocity_fn = vel_fn,
+            temperature_fn = (lon, lat, z, t) -> wet_fn(lon, lat, z) ? 5.0 : NaN,
+            bathymetry_fn = bathy_fn,
+            wet_mask_fn = wet_fn,
+            total_duration = 3600.0 * 6,
+            dt = 600.0,
+            κ_h = 20.0,
+            rng = rng
+        )
+        @test all(isfinite, tr.lons)
+        @test all(isfinite, tr.lats)
+        @test all(
+            i -> wet_fn(tr.lons[i], tr.lats[i], tr.depths[i]),
+            eachindex(tr.lons)
+        )
+
+        # Verify output_interval subsampling integrates at dt while recording at output_interval
+        tr_sub = TethysDrift.track_larval_cohort(
+            larvae;
+            velocity_fn = vel_fn,
+            temperature_fn = (lon, lat, z, t) -> wet_fn(lon, lat, z) ? 5.0 : NaN,
+            bathymetry_fn = bathy_fn,
+            wet_mask_fn = wet_fn,
+            total_duration = 3600.0 * 6,
+            dt = 600.0,
+            output_interval = 3600.0 * 2,
+            κ_h = 20.0,
+            rng = TethysDrift.Random.MersenneTwister(123)
+        )
+        @test size(tr_sub.lons, 2) == 4
+        @test tr_sub.times[1] == 0.0
+        @test tr_sub.times[end] == 3600.0 * 6
+        @test all(isfinite, tr_sub.lons)
     end
 end

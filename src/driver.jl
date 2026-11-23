@@ -64,13 +64,290 @@ function resolve_hydro_model_path(opts::HydrodynamicOptions, default_filename::S
     end
 end
 
-"""
-    build_flow_from_store(store; max_snapshots, span) -> (lon,lat,z,t) -> (u,v,w,T)
+@inline function _bracket_axis(vals::Vector{Float64}, v::Float64, asc::Bool)
+    n = length(vals)
+    n <= 1 && return (1, 1, 0.0)
+    idx = asc ? searchsortedfirst(vals, v) : searchsortedfirst(vals, v; rev = true)
+    i = clamp(idx, 2, n)
+    @inbounds v0 = vals[i - 1]
+    @inbounds v1 = vals[i]
+    denom = v1 - v0
+    s = denom == 0.0 ? 0.0 : clamp((v - v0) / denom, 0.0, 1.0)
+    return (i - 1, i, s)
+end
 
-The advective field for tracking, read from an already-opened `HydrodynamicStore`. Intervals
-are subsampled (endpoints kept) to at most `max_snapshots` so a long run is not held wholly
-in memory, the retained span is written back through `span`, and the field is bilinear in
-space and linear in time -- the contract `track_larval_cohort` expects of a velocity.
+@inline function _trilinear_f32(
+    a::Array{Float32, 3},
+    i0::Int, i1::Int, sx::Float64,
+    j0::Int, j1::Int, sy::Float64,
+    k0::Int, k1::Int, sz::Float64
+)::Float64
+    omx = 1.0 - sx
+    omy = 1.0 - sy
+    omz = 1.0 - sz
+    w000 = omx * omy * omz
+    w100 = sx  * omy * omz
+    w010 = omx * sy  * omz
+    w110 = sx  * sy  * omz
+    w001 = omx * omy * sz
+    w101 = sx  * omy * sz
+    w011 = omx * sy  * sz
+    w111 = sx  * sy  * sz
+    @inbounds begin
+        v000 = Float64(a[i0, j0, k0])
+        v100 = Float64(a[i1, j0, k0])
+        v010 = Float64(a[i0, j1, k0])
+        v110 = Float64(a[i1, j1, k0])
+        v001 = Float64(a[i0, j0, k1])
+        v101 = Float64(a[i1, j0, k1])
+        v011 = Float64(a[i0, j1, k1])
+        v111 = Float64(a[i1, j1, k1])
+    end
+    res = w000 * v000 + w100 * v100 + w010 * v010 + w110 * v110 +
+          w001 * v001 + w101 * v101 + w011 * v011 + w111 * v111
+    isfinite(res) && return res
+
+    # Near the seabed or coastline, deeper/land corners may be masked (NaN); renormalize
+    # over the finite wet corners so near-bottom larvae sample the bottom-most wet layer.
+    acc = 0.0
+    wsum = 0.0
+    if isfinite(v000); acc += w000 * v000; wsum += w000; end
+    if isfinite(v100); acc += w100 * v100; wsum += w100; end
+    if isfinite(v010); acc += w010 * v010; wsum += w010; end
+    if isfinite(v110); acc += w110 * v110; wsum += w110; end
+    if isfinite(v001); acc += w001 * v001; wsum += w001; end
+    if isfinite(v101); acc += w101 * v101; wsum += w101; end
+    if isfinite(v011); acc += w011 * v011; wsum += w011; end
+    if isfinite(v111); acc += w111 * v111; wsum += w111; end
+    return wsum > 0.0 ? acc / wsum : NaN
+end
+
+struct _FlowSlice
+    u::Array{Float32, 3}
+    v::Array{Float32, 3}
+    w::Array{Float32, 3}
+    T::Array{Float32, 3}
+end
+
+mutable struct _FlowWindowInterpolator
+    store::HydrodynamicStore
+    keep::Vector{Int}
+    lon::Vector{Float64}
+    lat::Vector{Float64}
+    z::Vector{Float64}
+    tsel::Vector{Float64}
+    lon_asc::Bool
+    lat_asc::Bool
+    z_asc::Bool
+    t_asc::Bool
+    cached_m0::Int
+    cached_m1::Int
+    s0::_FlowSlice
+    s1::_FlowSlice
+end
+
+function _read_flow_slice(store::HydrodynamicStore, idx::Int)::_FlowSlice
+    return _FlowSlice(
+        Float32.(variable(store, "u", idx)),
+        Float32.(variable(store, "v", idx)),
+        Float32.(variable(store, "w", idx)),
+        Float32.(variable(store, "T", idx))
+    )
+end
+
+function _ensure_flow_window!(fw::_FlowWindowInterpolator, m0::Int, m1::Int)
+    if fw.cached_m0 == m0 && fw.cached_m1 == m1
+        return nothing
+    end
+    if fw.cached_m1 == m0
+        fw.s0 = fw.s1
+        fw.cached_m0 = m0
+        fw.s1 = (m1 == m0) ? fw.s0 : _read_flow_slice(fw.store, fw.keep[m1])
+        fw.cached_m1 = m1
+    else
+        fw.s0 = _read_flow_slice(fw.store, fw.keep[m0])
+        fw.cached_m0 = m0
+        fw.s1 = (m1 == m0) ? fw.s0 : _read_flow_slice(fw.store, fw.keep[m1])
+        fw.cached_m1 = m1
+    end
+    return nothing
+end
+
+function (fw::_FlowWindowInterpolator)(lon_q::Real, lat_q::Real, z_q::Real, t_q::Real)
+    i0, i1, sx = _bracket_axis(fw.lon, Float64(lon_q), fw.lon_asc)
+    j0, j1, sy = _bracket_axis(fw.lat, Float64(lat_q), fw.lat_asc)
+    k0, k1, sz = _bracket_axis(fw.z, Float64(z_q), fw.z_asc)
+    m0, m1, θ = _bracket_axis(fw.tsel, Float64(t_q), fw.t_asc)
+    _ensure_flow_window!(fw, m0, m1)
+    w0 = 1.0 - θ
+    s0 = fw.s0
+    s1 = fw.s1
+    u = w0 * _trilinear_f32(s0.u, i0, i1, sx, j0, j1, sy, k0, k1, sz) +
+        θ  * _trilinear_f32(s1.u, i0, i1, sx, j0, j1, sy, k0, k1, sz)
+    v = w0 * _trilinear_f32(s0.v, i0, i1, sx, j0, j1, sy, k0, k1, sz) +
+        θ  * _trilinear_f32(s1.v, i0, i1, sx, j0, j1, sy, k0, k1, sz)
+    w = w0 * _trilinear_f32(s0.w, i0, i1, sx, j0, j1, sy, k0, k1, sz) +
+        θ  * _trilinear_f32(s1.w, i0, i1, sx, j0, j1, sy, k0, k1, sz)
+    T = w0 * _trilinear_f32(s0.T, i0, i1, sx, j0, j1, sy, k0, k1, sz) +
+        θ  * _trilinear_f32(s1.T, i0, i1, sx, j0, j1, sy, k0, k1, sz)
+    return (u = u, v = v, w = w, T = T)
+end
+
+function _sample_temperature(fw::_FlowWindowInterpolator, lon_q::Real, lat_q::Real, z_q::Real, t_q::Real)::Float64
+    i0, i1, sx = _bracket_axis(fw.lon, Float64(lon_q), fw.lon_asc)
+    j0, j1, sy = _bracket_axis(fw.lat, Float64(lat_q), fw.lat_asc)
+    k0, k1, sz = _bracket_axis(fw.z, Float64(z_q), fw.z_asc)
+    m0, m1, θ = _bracket_axis(fw.tsel, Float64(t_q), fw.t_asc)
+    _ensure_flow_window!(fw, m0, m1)
+    return (1.0 - θ) * _trilinear_f32(fw.s0.T, i0, i1, sx, j0, j1, sy, k0, k1, sz) +
+           θ         * _trilinear_f32(fw.s1.T, i0, i1, sx, j0, j1, sy, k0, k1, sz)
+end
+
+"""
+    _build_domain_interior_fn(fw::_FlowWindowInterpolator; margin_km = 25.0, rot_deg = 35.0)
+
+Return a predicate `(lon, lat) -> Bool` that is `true` when `(lon, lat)` lies at least
+`margin_km` inside the outer lateral edges of the realized hydrodynamic wet footprint
+(measured in the shelf-aligned frame rotated `rot_deg` CCW from East). Used to stop
+tracking larvae that approach open-ocean domain boundaries (`:off_domain`).
+"""
+function _build_domain_interior_fn(
+    fw::_FlowWindowInterpolator;
+    margin_km::Real = 25.0,
+    rot_deg::Real = 35.0
+)
+    s0 = fw.s0
+    nx, ny, _ = size(s0.u)
+    k_surf = argmax(fw.z)
+    lons = fw.lon
+    lats = fw.lat
+
+    lon_sum = 0.0
+    lat_sum = 0.0
+    wet_cnt = 0
+    for j in 1:ny, i in 1:nx
+        if isfinite(s0.u[i, j, k_surf]) && isfinite(s0.v[i, j, k_surf])
+            lon_sum += lons[i]
+            lat_sum += lats[j]
+            wet_cnt += 1
+        end
+    end
+    wet_cnt == 0 && return (_lo, _la) -> true
+    lon0 = lon_sum / wet_cnt
+    lat0 = lat_sum / wet_cnt
+
+    km_per_lat = 111.132
+    km_per_lon = 111.320 * cosd(lat0)
+    c_r = cosd(Float64(rot_deg))
+    s_r = sind(Float64(rot_deg))
+
+    x_min, x_max = Inf, -Inf
+    y_min, y_max = Inf, -Inf
+    for j in 1:ny, i in 1:nx
+        if isfinite(s0.u[i, j, k_surf]) && isfinite(s0.v[i, j, k_surf])
+            dx = (lons[i] - lon0) * km_per_lon
+            dy = (lats[j] - lat0) * km_per_lat
+            xk = dx * c_r + dy * s_r
+            yk = -dx * s_r + dy * c_r
+            xk < x_min && (x_min = xk); xk > x_max && (x_max = xk)
+            yk < y_min && (y_min = yk); yk > y_max && (y_max = yk)
+        end
+    end
+
+    # Only enforce margins if the domain is meaningfully wider than 2 * margin_km.
+    m = Float64(margin_km)
+    if (x_max - x_min) <= 3.0 * m || (y_max - y_min) <= 3.0 * m
+        return (_lo, _la) -> true
+    end
+    x_lo, x_hi = x_min + m, x_max - m
+    y_lo, y_hi = y_min + m, y_max - m
+
+    return (lo::Real, la::Real) -> begin
+        dx = (Float64(lo) - lon0) * km_per_lon
+        dy = (Float64(la) - lat0) * km_per_lat
+        xk = dx * c_r + dy * s_r
+        yk = -dx * s_r + dy * c_r
+        return (x_lo <= xk <= x_hi) && (y_lo <= yk <= y_hi)
+    end
+end
+
+function _build_static_wet_mask(
+    fw::_FlowWindowInterpolator;
+    bathy_elevation::Union{Nothing, AbstractMatrix} = nothing,
+    coastline = nothing
+)
+    # Build a 2D horizontal wet-ocean mask from the shallowest (surface) model layer so
+    # continental-shelf cells (where deeper z levels sit below the seabed) remain wet.
+    s0 = fw.s0
+    nx, ny, _ = size(s0.u)
+    k_surf = argmax(fw.z)
+    wet2d = BitMatrix(undef, nx, ny)
+    @inbounds for j in 1:ny, i in 1:nx
+        wet2d[i, j] = isfinite(s0.u[i, j, k_surf]) &&
+                      isfinite(s0.v[i, j, k_surf]) &&
+                      isfinite(s0.T[i, j, k_surf])
+    end
+
+    # Bake closed coastline polygons onto ALL wet grid cells once (regardless of smoothed
+    # seabed depth, which can be < -50 m near steep coastal channels such as Cape North).
+    if !isnothing(coastline) && !isempty(coastline)
+        closed_polys = [
+            (
+                min_x = minimum(p.lons),
+                max_x = maximum(p.lons),
+                min_y = minimum(p.lats),
+                max_y = maximum(p.lats),
+                lons = p.lons,
+                lats = p.lats
+            ) for p in coastline if length(p.lons) >= 3 &&
+                                    p.lons[begin] == p.lons[end] &&
+                                    p.lats[begin] == p.lats[end]
+        ]
+        if !isempty(closed_polys)
+            @inbounds for j in 1:ny
+                la = fw.lat[j]
+                for i in 1:nx
+                    wet2d[i, j] || continue
+                    lo = fw.lon[i]
+                    for cp in closed_polys
+                        if cp.min_x <= lo <= cp.max_x && cp.min_y <= la <= cp.max_y &&
+                           Tethys.point_in_polygon(lo, la, cp.lons, cp.lats)
+                            wet2d[i, j] = false
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    lon_min, lon_max = extrema(fw.lon)
+    lat_min, lat_max = extrema(fw.lat)
+    lon = fw.lon
+    lat = fw.lat
+    lon_asc = fw.lon_asc
+    lat_asc = fw.lat_asc
+
+    return function wet_mask_fn(lon_q::Real, lat_q::Real, z_q::Real)::Bool
+        lo = Float64(lon_q)
+        la = Float64(lat_q)
+        (lon_min <= lo <= lon_max && lat_min <= la <= lat_max) || return false
+        i0, i1, _ = _bracket_axis(lon, lo, lon_asc)
+        j0, j1, _ = _bracket_axis(lat, la, lat_asc)
+        @inbounds return wet2d[i0, j0] && wet2d[i1, j0] && wet2d[i0, j1] && wet2d[i1, j1]
+    end
+end
+
+"""
+    build_flow_from_store(store; max_snapshots, start_time, span) -> _FlowWindowInterpolator
+
+The advective field for tracking, read from an already-opened `HydrodynamicStore` via a
+two-snapshot sliding window in memory. Only the two time slices bracketing `t_q` are held
+as `Float32` 3D arrays at once (~340 MB for a 719 x 640 x 23 shelf grid rather than tens of
+gigabytes for the full record), sliding forward without re-reading the shared endpoint as
+`track_larval_cohort` advances monotonically in time. The retained span is written back
+through `span`, and interpolation is trilinear in space and linear in time using O(log N)
+binary search bracketing.
 """
 function build_flow_from_store(store::HydrodynamicStore;
                                max_snapshots::Int = typemax(Int),
@@ -83,44 +360,37 @@ function build_flow_from_store(store::HydrodynamicStore;
         "(store spans $(t[1]) .. $(t[end]) s)."
     )
     nt = length(valid_idx)
-    keep = nt <= max_snapshots ? valid_idx :
+    keep = (max_snapshots <= 0 || nt <= max_snapshots) ? valid_idx :
            valid_idx[sort(unique(round.(Int, range(1, stop = nt, length = max(2, max_snapshots)))))]
-    tsel = t[keep]
+    tsel = Float64.(t[keep])
 
-    lon = store.axes.lon; lat = store.axes.lat; z = store.axes.depth
-    fields = ("u", "v", "w", "T")
-    data = Dict{String, Vector{Array{Float64, 3}}}(
-        n => [variable(store, n, k) for k in keep] for n in fields)
+    lon = Float64.(collect(store.axes.lon))
+    lat = Float64.(collect(store.axes.lat))
+    z = Float64.(collect(store.axes.depth))
 
-    _bracket(vals, v) = begin
-        n = length(vals)
-        n <= 1 && return (1, 1, 0.0)
-        i = clamp(something(findfirst(x -> x > v, vals), n), 2, n)
-        denom = vals[i] - vals[i - 1]
-        s = denom == 0.0 ? 0.0 : clamp((v - vals[i - 1]) / denom, 0.0, 1.0)
-        return (i - 1, i, s)
-    end
+    s0 = _read_flow_slice(store, keep[1])
+    m1_init = length(keep) > 1 ? 2 : 1
+    s1 = m1_init == 1 ? s0 : _read_flow_slice(store, keep[m1_init])
 
-    span[1] = tsel[1]; span[2] = tsel[end]
-    return function flow_interpolator(lon_q::Real, lat_q::Real, z_q::Real, t_q::Real)
-        i0, i1, sx = _bracket(lon, Float64(lon_q))
-        j0, j1, sy = _bracket(lat, Float64(lat_q))
-        k0, k1, sz = _bracket(z, Float64(z_q))
-        m0, m1, θ = _bracket(tsel, Float64(t_q))
-        sample(name) = begin
-            arr = data[name]
-            a = 0.0
-            for (ar, wf) in ((arr[m0], 1.0 - θ), (arr[m1], θ))
-                a += wf * (
-                    (1-sx)*(1-sy)*(1-sz)*ar[i0,j0,k0] + sx*(1-sy)*(1-sz)*ar[i1,j0,k0] +
-                    (1-sx)*sy*(1-sz)*ar[i0,j1,k0]     + sx*sy*(1-sz)*ar[i1,j1,k0] +
-                    (1-sx)*(1-sy)*sz*ar[i0,j0,k1]     + sx*(1-sy)*sz*ar[i1,j0,k1] +
-                    (1-sx)*sy*sz*ar[i0,j1,k1]         + sx*sy*sz*ar[i1,j1,k1])
-            end
-            return a
-        end
-        return (u = sample("u"), v = sample("v"), w = sample("w"), T = sample("T"))
-    end
+    span[1] = tsel[1]
+    span[2] = tsel[end]
+
+    return _FlowWindowInterpolator(
+        store,
+        keep,
+        lon,
+        lat,
+        z,
+        tsel,
+        length(lon) <= 1 || lon[end] >= lon[1],
+        length(lat) <= 1 || lat[end] >= lat[1],
+        length(z) <= 1 || z[end] >= z[1],
+        length(tsel) <= 1 || tsel[end] >= tsel[1],
+        1,
+        m1_init,
+        s0,
+        s1
+    )
 end
 
 
@@ -179,7 +449,8 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
 
     # Spawning area: the CFA boundaries if present, else the realized simulation's own domain
     # (its interior cell centres, so larvae are released where the flow is defined), else the
-    # configured domain expanded by the buffer.
+    # configured domain expanded by the buffer. Intersect with the hydrodynamic store bounds
+    # when a store is loaded so larvae are never seeded outside the realized ocean grid.
     cfa_polys = load_cfa_polygons(opts.input_dir)
     spawn_lon, spawn_lat = if !isempty(cfa_polys)
         env = get_strata_buffered_envelope(cfa_polys, buffer_km = opts.buffer_km)
@@ -189,36 +460,38 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
     else
         Tethys.expand_domain_with_buffer(opts.domain_lon, opts.domain_lat, buffer_km = opts.buffer_km)
     end
+    if !isnothing(store)
+        s_lon = extrema(store.axes.lon)
+        s_lat = extrema(store.axes.lat)
+        spawn_lon = (max(spawn_lon[1], s_lon[1]), min(spawn_lon[2], s_lon[2]))
+        spawn_lat = (max(spawn_lat[1], s_lat[1]), min(spawn_lat[2], s_lat[2]))
+    end
 
-    # Seabed bathymetric elevation. Built *before* anything uses it, because this used to be
-    # built a hundred lines further down and read here: an assignment later in the body does
-    # not make the name exist earlier, so the spawn died on an undefined variable -- and the
-    # only way to see that was to run the driver. Resolved from the run's source and range
-    # through `Tethys`, so the seeded larvae sit on the same sea floor the model was
-    # built on.
+    # Resolve coastline polygons BEFORE spawning so land rejection uses real shoreline
+    # geometry at both initialization and transport steps.
+    coast_candidates = String[
+        joinpath(opts.input_dir, "coastline.parquet"),
+        isnothing(store) ? "" : joinpath(dirname(store.location), "inputs", "coastline.parquet"),
+        joinpath(Tethys.store_path("natural_earth_10m"), "coastline.parquet")
+    ]
+    coast_path = findfirst(p -> !isempty(p) && isfile(p), coast_candidates)
+    coast_polys = isnothing(coast_path) ? nothing :
+                  Tethys.load_coastline_polygons(coast_candidates[coast_path])
+    if !isnothing(coast_polys) && isempty(coast_polys)
+        coast_polys = nothing
+    end
+    if !isnothing(coast_polys)
+        println("Coastline: loaded $(length(coast_polys)) polygon(s) from $(coast_candidates[coast_path]).")
+    end
+
+    # Seabed bathymetric elevation. Built *before* anything uses it, so the spawn and
+    # the advection sit on the same sea floor.
     run_bathy = _larval_bathymetry(opts, store)
     bathy_field_fn = get_bathymetry_interpolator(
         run_bathy.elevation, Float64.(collect(run_bathy.lon)), Float64.(collect(run_bathy.lat)))
 
-    println("Initializing $(opts.n_particles) Zoea I larvae in marine water (mode = $(opts.release_depth_mode), min depth >= $(opts.min_seabed_depth) m)...")
-    larvae = initialize_larval_particles(
-        opts.n_particles,
-        lon_range = spawn_lon,
-        lat_range = spawn_lat,
-        release_depth_mode = opts.release_depth_mode,
-        bottom_offset = opts.bottom_release_offset,
-        ascent_target_depth = opts.ascent_target_depth,
-        min_seabed_depth = opts.min_seabed_depth,
-        buffer_km = 0.0, # Buffer is already incorporated into spawn_lon/spawn_lat
-        bathymetry = bathy_field_fn,
-        stage = :zoea1,
-        rng = rng
-    )
-
-    # Span, in seconds, of the hydrodynamic record the cohort will be advected through. The
-    # cohort is tracked for this whole span and stops early only once every larva is dead or
-    # settled, so the drift is never shorter than the model it is driven by. `build_flow_from_store`
-    # writes the retained span back through `hydro_span`.
+    # Build the hydrodynamic flow interpolator BEFORE spawning so `wet_mask_fn` can reject
+    # cells that lie outside the realized (possibly rotated) ocean footprint.
     opts.hydro_start_days < 0.0 && error(
         "hydro_start_days must be non-negative (got $(opts.hydro_start_days))."
     )
@@ -227,10 +500,6 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
         println("Reading 4D simulated fields from the Tethys store at $(store.location) " *
                 "($(length(store.times)) interval(s), start offset = $(opts.hydro_start_days) d)...")
         try
-            # Intervals are held in memory for the run: `track_larval_cohort` samples the field
-            # many times a step, and re-reading a Zarr array per sample turns the step into I/O.
-            # A production run stores thousands of snapshots, so `max_flow_snapshots` bounds how
-            # many are held (evenly subsampled, endpoints kept) rather than silently stalling.
             interp = build_flow_from_store(
                 store;
                 max_snapshots = opts.max_flow_snapshots,
@@ -242,9 +511,6 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
                     "($(round((hydro_span[2] - hydro_span[1]) / 86400, digits = 2)) days)")
             interp
         catch err
-            # Falling back to an analytical current here would silently replace the simulated
-            # hydrodynamics with a synthetic jet, turning a memory limit into a wrong scientific
-            # result. Make the failure explicit and actionable instead.
             if opts.allow_analytical_fallback
                 @warn "Failed to read the flow field from $(location): " *
                       "$(sprint(showerror, err)). Falling back to the analytical jet because " *
@@ -267,10 +533,54 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
 
     # Align tracking clock t = 0 with the retained hydrodynamic origin hydro_span[1]
     # (which includes any TethysFlow spinup offset plus opts.hydro_start_days).
+    # Build a static 3D BitArray wet mask ONCE from the initial hydrodynamic slice +
+    # coastline polygons so wet/land checks take O(log N) nanoseconds and never evict
+    # the active two-snapshot sliding window.
     hydro_t0 = hydro_span[1]
+    domain_interior_fn = if !isnothing(flow_interpolator) && !isnothing(store)
+        _build_domain_interior_fn(flow_interpolator; margin_km = 25.0, rot_deg = 35.0)
+    else
+        nothing
+    end
+    wet_mask_fn = if !isnothing(flow_interpolator) && !isnothing(store)
+        raw_wet = _build_static_wet_mask(
+            flow_interpolator;
+            bathy_elevation = run_bathy.elevation,
+            coastline = coast_polys
+        )
+        raw_wet
+    else
+        nothing
+    end
+    spawn_wet_fn = if !isnothing(wet_mask_fn) && !isnothing(domain_interior_fn)
+        (lo, la, z) -> wet_mask_fn(lo, la, z) && domain_interior_fn(lo, la)
+    else
+        wet_mask_fn
+    end
+
+    println("Initializing $(opts.n_particles) Zoea I larvae in marine water (mode = $(opts.release_depth_mode), min depth >= $(opts.min_seabed_depth) m)...")
+    larvae = initialize_larval_particles(
+        opts.n_particles,
+        lon_range = spawn_lon,
+        lat_range = spawn_lat,
+        release_depth_mode = opts.release_depth_mode,
+        bottom_offset = opts.bottom_release_offset,
+        ascent_target_depth = opts.ascent_target_depth,
+        min_seabed_depth = opts.min_seabed_depth,
+        max_seabed_depth = opts.max_seabed_depth,
+        buffer_km = 0.0, # Buffer is already incorporated into spawn_lon/spawn_lat
+        bathymetry = bathy_field_fn,
+        coastline = coast_polys,
+        wet_mask_fn = spawn_wet_fn,
+        stage = :zoea1,
+        rng = rng
+    )
+
     flow_field_fn = if !isnothing(flow_interpolator)
+        fw = flow_interpolator
+        t0 = hydro_t0
         (lon, lat, z, t) -> begin
-            f = flow_interpolator(lon, lat, z, t + hydro_t0)
+            f = fw(lon, lat, z, t + t0)
             (f.u, f.v, f.w)
         end
     else
@@ -293,10 +603,9 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
     end
 
     temp_field_fn = if !isnothing(flow_interpolator)
-        (lon, lat, z, t) -> begin
-            f = flow_interpolator(lon, lat, z, t + hydro_t0)
-            f.T
-        end
+        fw = flow_interpolator
+        t0 = hydro_t0
+        (lon, lat, z, t) -> _sample_temperature(fw, lon, lat, z, t + t0)
     else
         # 3D Scotian Shelf thermal structure: surface mixed layer + CIL + slope water.
         # Consistent with set_initial_stratification! in hydrodynamic_model.jl.
@@ -321,14 +630,6 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
         end
     end
 
-    # Seabed bathymetric elevation. Built above, at the point of first use, so the spawn and
-    # the advection sit on the same sea floor.
-    coastline_path = joinpath(opts.input_dir, "coastline.parquet")
-    coast_polys = isfile(coastline_path) ? Tethys.load_coastline_polygons(coastline_path) : nothing
-    if !isnothing(coast_polys) && isempty(coast_polys)
-        coast_polys = nothing
-    end
-
     # Honor the configured track_duration_days (<= 0 uses the full remaining hydrodynamic
     # span), capped to the available hydrodynamic span when a hydrodynamic store is loaded.
     # The cohort still stops early once every larva is dead or settled.
@@ -346,6 +647,38 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
     else
         opts.track_duration
     end
+    # Probabilistic egg hatching aligned with TethysBio's temperature-dependent brooding
+    # rule (`tau = 365 * (5 / max(1, T_bed))^0.3 + N(0, 5)`), integrated against the
+    # realized local benthic temperature climatology when the tracking horizon covers
+    # at least half an annual cycle.
+    release_times = if track_horizon >= 180.0 * 86400.0
+        base_date = Dates.Date(2020, 6, 1)  # Default June 1, 2020 origin matching scotian_shelf.toml
+        if !isnothing(store) && hasproperty(store, :attrs)
+            iso_str = get(store.attrs, "time_origin_iso", "")
+            if !isempty(string(iso_str))
+                try
+                    base_date = Dates.Date(first(split(string(iso_str), "T")))
+                catch
+                end
+            end
+        end
+        nom_start_date = base_date + Dates.Day(round(Int, hydro_t0 / 86400.0))
+        origin_doy = Float64(Dates.dayofyear(nom_start_date))
+        rt = sample_brood_hatch_times(
+            larvae.lon, larvae.lat, larvae.depth;
+            temperature_fn = temp_field_fn,
+            origin_doy = origin_doy,
+            total_duration = track_horizon,
+            rng = rng
+        )
+        println("  probabilistic hatching (Arrhenius-weighted Jan-Apr cohort, start $(Dates.format(nom_start_date, "yyyy-mm-dd")), DOY $(round(Int, origin_doy))): " *
+                "release days $(round(minimum(rt) / 86400.0 + 1.0, digits=1))..$(round(maximum(rt) / 86400.0 + 1.0, digits=1)) d " *
+                "(median $(round(median(rt) / 86400.0 + 1.0, digits=1)) d)")
+        rt
+    else
+        nothing
+    end
+
     println("Tracking cohort over up to $(track_horizon / 86400.0) days " *
             "(dt=$(opts.track_dt)s, stops early when all larvae are dead or settled)...")
     trajectories = track_larval_cohort(
@@ -355,6 +688,8 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
         bathymetry_fn = bathy_field_fn,
         total_duration = track_horizon,
         dt = opts.track_dt,
+        output_interval = opts.output_schedule_seconds,
+        release_times = release_times,
         max_current_speed = opts.max_current_speed,
         κ_h = opts.diffusivity_h,
         κ_v = opts.diffusivity_v,
@@ -396,9 +731,19 @@ function run_segment_tracking(; opts::HydrodynamicOptions = HydrodynamicOptions(
         enable_initial_ascent = opts.enable_initial_ascent,
         ascent_speed = opts.ascent_speed,
         ascent_target_depth = opts.ascent_target_depth,
-        coastline = coast_polys,
+        # When `wet_mask_fn` is active it already encodes the baked coastline polygons;
+        # avoid repeating polygon ray-casting on every particle step.
+        coastline = isnothing(wet_mask_fn) ? coast_polys : nothing,
+        wet_mask_fn = wet_mask_fn,
+        domain_interior_fn = domain_interior_fn,
         rng = rng
     )
+
+    # Release the streaming hydrodynamic slice cache before writing the Zarr checkpoint.
+    flow_interpolator = nothing
+    flow_field_fn = nothing
+    temp_field_fn = nothing
+    wet_mask_fn = nothing
 
     # Save trajectories to Zarr checkpoint for modular reloading
     mkpath(opts.output_dir)
@@ -533,7 +878,7 @@ function run_segment_metrics(;
     cfa_polys = load_cfa_polygons(opts.input_dir)
     cfa_definitions = if !isempty(cfa_polys)
         println("Loaded $(length(cfa_polys)) CFA boundary polygons from $(opts.input_dir)/: $(join([p.name for p in cfa_polys], ", "))")
-        vcat(cfa_polys, [(name = "Offshore / Slope", lon = (-68.0, -57.0), lat = (40.0, 43.0))])
+        vcat(cfa_polys, [(name = "Outside / Offshore",)])
     else
         [
             (name = "CFA 20-22 (Eastern NS)", lon = (-62.0, -57.0), lat = (44.5, 47.5)),
@@ -873,8 +1218,22 @@ function run_segment_visualize(;
         (try open_hydrodynamics(hydro_location) catch; nothing end) : nothing
     bathy_data = _larval_bathymetry(opts, hydro_store)
 
+    viz_coast_candidates = String[
+        joinpath(opts.input_dir, "coastline.parquet"),
+        isnothing(hydro_store) ? "" : joinpath(dirname(hydro_store.location), "inputs", "coastline.parquet"),
+        joinpath(Tethys.store_path("natural_earth_10m"), "coastline.parquet")
+    ]
+    viz_coast_idx = findfirst(p -> !isempty(p) && isfile(p), viz_coast_candidates)
+    viz_coast = isnothing(viz_coast_idx) ? nothing :
+                Tethys.load_coastline_polygons(viz_coast_candidates[viz_coast_idx])
+    if !isnothing(viz_coast) && isempty(viz_coast)
+        viz_coast = nothing
+    end
+
     lon_b = range(opts.domain_lon[1], opts.domain_lon[2], length = opts.grid_size[1])
     lat_b = range(opts.domain_lat[1], opts.domain_lat[2], length = opts.grid_size[2])
+
+    map_rot_deg = 35.0
 
     # 1. 2D Particle Trajectories Map
     fig1_path = joinpath(opts.output_dir, "larval_trajectories.png")
@@ -884,6 +1243,8 @@ function run_segment_visualize(;
         target_trajs,
         bathymetry_data = bathy_data,
         strata = cfa_polys,
+        coastline = viz_coast,
+        rotation_deg = map_rot_deg,
         title = "Snow Crab Larval Dispersal",
         output_path = fig1_path
     )
@@ -903,6 +1264,8 @@ function run_segment_visualize(;
     println("Rendering 2D settlement density distribution -> $(fig3_path)...")
     plot_larval_dispersal_density(
         target_trajs,
+        coastline = viz_coast,
+        rotation_deg = map_rot_deg,
         title = "Snow Crab Nursery Settlement Density (%)",
         output_path = fig3_path
     )
@@ -911,13 +1274,18 @@ function run_segment_visualize(;
     fig4_path = joinpath(opts.output_dir, "empirical_movement_field.png")
     println("Rendering empirical velocity quiver field -> $(fig4_path)...")
     emp_mov = estimate_empirical_movement(target_trajs, lon_bins = lon_b, lat_bins = lat_b)
-    plot_empirical_movement_field(emp_mov, output_path = fig4_path)
+    plot_empirical_movement_field(
+        emp_mov;
+        coastline = viz_coast,
+        rotation_deg = map_rot_deg,
+        output_path = fig4_path
+    )
 
     # 5. Annotated Regional Connectivity Matrix
     fig5_path = joinpath(opts.output_dir, "regional_connectivity_matrix.png")
     println("Rendering regional connectivity matrix -> $(fig5_path)...")
     cfa_defs = if !isempty(cfa_polys)
-        vcat(cfa_polys, [(name = "Offshore / Slope", lon = (-68.0, -57.0), lat = (40.0, 43.0))])
+        vcat(cfa_polys, [(name = "Outside / Offshore",)])
     else
         [
             (name = "CFA 20-22 (Eastern NS)", lon = (-62.0, -57.0), lat = (44.5, 47.5)),
@@ -933,13 +1301,23 @@ function run_segment_visualize(;
     fig6_path = joinpath(opts.output_dir, "thermal_exposure_map.png")
     println("Rendering thermal exposure map -> $(fig6_path)...")
     therm_metrics = compute_gridded_thermal_metrics(target_trajs, lon_bins = lon_b, lat_bins = lat_b)
-    plot_thermal_exposure_map(therm_metrics, output_path = fig6_path)
+    plot_thermal_exposure_map(
+        therm_metrics;
+        coastline = viz_coast,
+        rotation_deg = map_rot_deg,
+        output_path = fig6_path
+    )
 
     # 7. Recruitment Summary
     fig7_path = joinpath(opts.output_dir, "recruitment_summary.png")
     println("Rendering recruitment summary bar chart -> $(fig7_path)...")
     rec_metrics = compute_gridded_recruitment_metrics(target_trajs, lon_bins = lon_b, lat_bins = lat_b)
-    plot_recruitment_summary(rec_metrics, output_path = fig7_path)
+    plot_recruitment_summary(
+        rec_metrics;
+        coastline = viz_coast,
+        rotation_deg = map_rot_deg,
+        output_path = fig7_path
+    )
 
     # 7b. Larval biology diagnostics: stage progression, thermal-time growth, and survival.
     # These were previously only embedded in the interactive HTML payload and never drawn, which
@@ -987,36 +1365,60 @@ function run_segment_visualize(;
 
     if !isnothing(active_hydro)
         println("Rendering hydrodynamic advection velocity field -> $(fig8_path)...")
-        plot_hydrodynamic_advection(active_hydro, bathymetry_data = bathy_data, output_path = fig8_path)
+        plot_hydrodynamic_advection(
+            active_hydro;
+            bathymetry_data = bathy_data,
+            coastline = viz_coast,
+            rotation_deg = map_rot_deg,
+            output_path = fig8_path
+        )
 
         println("Rendering hydrodynamic seawater temperature & salinity tracers -> $(fig9_path)...")
-        plot_hydrodynamic_tracers(active_hydro, output_path = fig9_path)
+        plot_hydrodynamic_tracers(
+            active_hydro;
+            coastline = viz_coast,
+            rotation_deg = map_rot_deg,
+            output_path = fig9_path
+        )
 
         println("Rendering hydrodynamic stratification diagnostics (N², S) -> $(fig_strat_path)...")
-        plot_hydrodynamic_stratification(active_hydro, output_path = fig_strat_path)
+        plot_hydrodynamic_stratification(
+            active_hydro;
+            coastline = viz_coast,
+            rotation_deg = map_rot_deg,
+            output_path = fig_strat_path
+        )
 
-        println("Rendering hydrodynamic turbulent diffusion & eddy viscosity -> $(fig_diff_path)...")
-        plot_hydrodynamic_diffusion(active_hydro, output_path = fig_diff_path)
+        # Skip vertical diffusivity map when the store carries only a uniform background placeholder.
+        diff_vals = filter(isfinite, vec(active_hydro.diffusion))
+        if !isempty(diff_vals) && (maximum(diff_vals) - minimum(diff_vals)) > 1e-12
+            println("Rendering hydrodynamic turbulent diffusion & eddy viscosity -> $(fig_diff_path)...")
+            plot_hydrodynamic_diffusion(
+                active_hydro;
+                coastline = viz_coast,
+                rotation_deg = map_rot_deg,
+                output_path = fig_diff_path
+            )
+        else
+            println("Skipping vertical diffusion figure (κ_v is not archived in the hydrodynamic store).")
+        end
 
-        println("Rendering hydrodynamic vertical cross-section -> $(fig_sec_path)...")
+        println("Rendering across-shelf hydrodynamic vertical cross-section -> $(fig_sec_path)...")
         plot_hydrodynamic_section(
-            active_hydro,
+            active_hydro;
             variable = :temperature,
-            coordinate = 44.0,
-            section_type = :lat,
+            section_type = :cross_shelf,
             output_path = fig_sec_path
         )
 
-        # 8b. Eulerian time series at a representative station. This plot function existed but was
-        # never called by the driver, so no run ever produced an Eulerian time series — the standard
-        # check that a simulation is evolving plausibly at a fixed point.
+        # 8b. Eulerian time series at a representative wet shelf station.
         fig_ts_path = joinpath(opts.output_dir, "hydrodynamic_timeseries.png")
         println("Rendering hydrodynamic station time series -> $(fig_ts_path)...")
         try
             plot_hydrodynamic_timeseries(
-                active_hydro,
-                station = (opts.domain_lon[1] + 0.55 * (opts.domain_lon[2] - opts.domain_lon[1]),
-                           opts.domain_lat[1] + 0.55 * (opts.domain_lat[2] - opts.domain_lat[1])),
+                active_hydro;
+                store = hydro_store,
+                station = (-62.0, 44.0),
                 variable = :temperature,
                 output_path = fig_ts_path
             )
@@ -1024,19 +1426,20 @@ function run_segment_visualize(;
             @warn "Station time-series plot failed (non-fatal): $(sprint(showerror, err))"
         end
 
-        # 8c. Additional Eulerian diagnostics. The time series above is now built from the real
-        # snapshots; these three were absent entirely.
-        fig_hov_path = joinpath(opts.output_dir, "hydrodynamic_hovmoller.png")
+        # 8c. Additional Eulerian diagnostics.
+        fig_hov_path = joinpath(opts.output_dir, "hydrodynamic_depth_time_profile.png")
         fig_tbot_path = joinpath(opts.output_dir, "bottom_temperature_map.png")
         fig_ts_diagram_path = joinpath(opts.output_dir, "ts_diagram.png")
-        st_lon = opts.domain_lon[1] + 0.55 * (opts.domain_lon[2] - opts.domain_lon[1])
-        st_lat = opts.domain_lat[1] + 0.55 * (opts.domain_lat[2] - opts.domain_lat[1])
+        st_lon, st_lat = -62.0, 44.0
         for (label, path, f) in (
-            ("time-depth diagram", fig_hov_path,
-             () -> plot_hydrodynamic_hovmoller(active_hydro; station = (st_lon, st_lat),
+            ("depth-time profile", fig_hov_path,
+             () -> plot_hydrodynamic_hovmoller(active_hydro; store = hydro_store,
+                                               station = (st_lon, st_lat),
                                                variable = :temperature, output_path = fig_hov_path)),
             ("near-bed temperature map", fig_tbot_path,
-             () -> plot_hydrodynamic_bottom_temperature(active_hydro; output_path = fig_tbot_path)),
+             () -> plot_hydrodynamic_bottom_temperature(active_hydro; coastline = viz_coast,
+                                                        rotation_deg = map_rot_deg,
+                                                        output_path = fig_tbot_path)),
             ("temperature-salinity diagram", fig_ts_diagram_path,
              () -> plot_hydrodynamic_ts_diagram(active_hydro; output_path = fig_ts_diagram_path))
             )
@@ -1167,11 +1570,27 @@ function run_segment_visualize(;
     # 10. Interactive HTML5 Dashboard (with zlib-compressed sidecar payload)
     html_path = joinpath(opts.output_dir, "interactive_larval_tracks.html")
     if opts.interactive_map
-        println("Rendering interactive Leaflet larval dispersal dashboard -> $(html_path)...")
+        base_date = Dates.Date(2020, 6, 1)
+        if !isnothing(hydro_store) && hasproperty(hydro_store, :attrs)
+            iso_str = get(hydro_store.attrs, "time_origin_iso", "")
+            if !isempty(string(iso_str))
+                try
+                    base_date = Dates.Date(first(split(string(iso_str), "T")))
+                catch
+                end
+            end
+        end
+        store_t0_days = (!isnothing(hydro_store) && !isempty(hydro_store.times)) ?
+            (Float64(hydro_store.times[1]) / 86400.0) : 0.0
+        nom_start_date = base_date + Dates.Day(round(Int, store_t0_days + opts.hydro_start_days))
+        start_date_iso = Dates.format(nom_start_date, "yyyy-mm-dd")
+        println("Rendering interactive Leaflet larval dispersal dashboard -> $(html_path) (start date: $(start_date_iso))...")
         export_interactive_tracks_html(
             html_path;
             runs_data = runs_bundle,
-            title = "Scotian Shelf Snow Crab Larval Dispersal Trajectories"
+            title = "Scotian Shelf Snow Crab Larval Dispersal Trajectories",
+            start_date_iso = start_date_iso,
+            max_points_per_track = 550
         )
     end
 
